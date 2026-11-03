@@ -1,0 +1,1 @@
+CREATE INDEX "businesses_location_latitude_longitude_idx" ON "businesses" USING btree ("latitude","longitude");

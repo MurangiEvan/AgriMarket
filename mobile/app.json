@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "AgriMarket",
+    "slug": "agrimarket",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./public/agrimarket-icon-512.png",
+    "scheme": "agrimarket",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./public/agrimarket-icon-512.png"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./public/agrimarket-icon-512.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./public/agrimarket-icon-192.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow AgriMarket to use your location to show produce near you."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#183f32",
+          "image": "./public/agrimarket-icon-512.png",
+          "imageWidth": 160
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

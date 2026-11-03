@@ -1,0 +1,1 @@
+ALTER TABLE "verification_submissions" ADD COLUMN "seller_feedback" text;

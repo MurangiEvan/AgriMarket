@@ -1,0 +1,2 @@
+CREATE INDEX "businesses_name_search_idx" ON "businesses" USING gin (to_tsvector('simple', "name"));--> statement-breakpoint
+CREATE INDEX "listings_search_idx" ON "listings" USING gin (to_tsvector('simple', "title" || ' ' || "description"));

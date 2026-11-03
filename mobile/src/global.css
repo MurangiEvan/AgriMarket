@@ -1,0 +1,42 @@
+:root {
+  color-scheme: light;
+  --color-forest: #183f32;
+  --color-leaf: #3b7058;
+  --color-harvest: #e8b74d;
+  --color-clay: #d98a51;
+  --color-paper: #f3f5ed;
+  --color-ink: #183f32;
+  --color-muted: #65736a;
+  --color-border: #d8ded4;
+  --font-display: Georgia, 'Times New Roman', serif;
+  --font-body: 'Spline Sans', 'Trebuchet MS', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 100vh;
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  letter-spacing: 0;
+}
+
+body,
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-clay);
+  outline-offset: 3px;
+}

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "verification_one_pending_per_business_unique" ON "verification_submissions" USING btree ("business_id") WHERE "verification_submissions"."status" = 'pending';

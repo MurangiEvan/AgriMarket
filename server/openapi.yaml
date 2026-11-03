@@ -1,0 +1,381 @@
+openapi: 3.1.0
+info:
+  title: AgriMarket API
+  version: 1.0.0
+  description: Versioned B2B directory API. No payment, checkout, fulfilment, or logistics endpoints.
+servers:
+  - url: /api/v1
+security:
+  - accessCookie: []
+  - bearerAccess: []
+paths:
+  /health/live:
+    get:
+      security: []
+      summary: Process liveness
+      responses:
+        '200': { description: Process is alive }
+  /health/ready:
+    get:
+      security: []
+      summary: Database readiness
+      responses:
+        '200': { description: API and database are ready }
+        '503': { description: Dependency unavailable }
+  /auth/register:
+    post:
+      security: []
+      summary: Register a buyer or seller account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password, role]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 10, maxLength: 128 }
+                role: { type: string, enum: [buyer, seller] }
+      responses:
+        '201': { description: Account and session created }
+        '400': { description: Invalid input }
+        '409': { description: Email already registered }
+        '429': { description: Rate limit exceeded }
+  /auth/login:
+    post:
+      security: []
+      summary: Sign in and issue a short-lived access credential and rotating refresh credential
+      responses:
+        '200': { description: Session created; web uses HttpOnly cookies and native clients receive credentials for secure storage }
+        '401': { description: Invalid credentials }
+        '429': { description: Rate limit exceeded }
+  /auth/refresh:
+    post:
+      security: []
+      summary: Rotate the refresh credential and issue a new access credential
+      description: Web clients use an HttpOnly Secure SameSite cookie. Native clients send the refresh token in the request body over HTTPS and must store it in platform secure storage.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                refreshToken: { type: string, minLength: 32, maxLength: 128 }
+      responses:
+        '200': { description: Credentials rotated; the previous refresh token is no longer valid }
+        '401': { description: Refresh credential expired, revoked, or invalid }
+        '429': { description: Rate limit exceeded }
+  /auth/logout:
+    post:
+      summary: Revoke the current session
+      responses:
+        '204': { description: Session revoked }
+  /auth/me:
+    get:
+      summary: Return the current safe user profile
+      responses:
+        '200': { description: Current user }
+        '401': { description: Authentication required }
+  /categories:
+    get:
+      security: []
+      summary: List active categories with active produce types
+      responses:
+        '200': { description: Active categories }
+  /market/categories:
+    get:
+      summary: List buyer market categories
+      description: Requires a buyer session. Results come from the controlled category and produce-type tables.
+      responses:
+        '200': { description: Active categories containing active produce types }
+        '401': { description: Authentication required }
+        '403': { description: Buyer role required }
+        '503': { description: Market catalogue migrations or seed data are not installed }
+  /market/produce:
+    get:
+      summary: List produce availability for one buyer location and radius
+      description: Requires a buyer session. Returns counts and rounded distance only; never returns business or buyer coordinates.
+      parameters:
+        - { in: query, name: categoryId, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: radiusKm, required: true, schema: { type: integer, enum: [5, 10, 15, 20, 25, 30, 40, 50] } }
+        - { in: query, name: lat, required: true, schema: { type: number, minimum: -90, maximum: 90 } }
+        - { in: query, name: lng, required: true, schema: { type: number, minimum: -180, maximum: 180 } }
+        - { in: query, name: q, schema: { type: string, maxLength: 80 } }
+      responses:
+        '200': { description: Active produce types ordered by availability and name, with rounded nearest distance }
+        '400': { description: Invalid category, radius, or location }
+        '401': { description: Authentication required }
+        '403': { description: Buyer role required }
+        '503': { description: Market catalogue migrations or seed data are not installed }
+  /buyer/location:
+    get:
+      summary: Read the signed-in buyer's saved location
+      responses:
+        '200': { description: The buyer's own saved location or null }
+        '401': { description: Authentication required }
+        '403': { description: Buyer role required }
+    put:
+      summary: Save a buyer-selected location result to their profile
+      description: Coordinates are private to the buyer and are never exposed to sellers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label, latitude, longitude]
+              properties:
+                label: { type: string, minLength: 2, maxLength: 160 }
+                latitude: { type: number, minimum: -90, maximum: 90 }
+                longitude: { type: number, minimum: -180, maximum: 180 }
+      responses:
+        '200': { description: Saved location returned to its owner }
+        '400': { description: Invalid location }
+        '401': { description: Authentication required }
+        '403': { description: Buyer role required }
+    delete:
+      summary: Remove the buyer's saved location
+      responses:
+        '204': { description: Saved location cleared }
+        '401': { description: Authentication required }
+        '403': { description: Buyer role required }
+  /buyer/location/search:
+    get:
+      summary: Search South African areas through the configured server-side geocoder
+      description: Requires a buyer session. Searches only when explicitly submitted; requests are rate limited.
+      parameters:
+        - { in: query, name: q, required: true, schema: { type: string, minLength: 2, maxLength: 120 } }
+      responses:
+        '200': { description: Up to five location candidates for the signed-in buyer }
+        '400': { description: Invalid search text }
+        '401': { description: Authentication required }
+        '403': { description: Buyer role required }
+        '429': { description: Location search rate limit exceeded }
+        '503': { description: Geocoder unavailable or not configured }
+  /listings:
+    get:
+      security: []
+      summary: Search active, in-stock, unexpired listings for approved businesses
+      parameters:
+        - { in: query, name: q, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: category, schema: { type: string } }
+        - { in: query, name: produceTypeId, schema: { type: string, format: uuid } }
+        - { in: query, name: province, schema: { type: string, enum: [Eastern Cape, Free State, Gauteng, KwaZulu-Natal, Limpopo, Mpumalanga, Northern Cape, North West, Western Cape] } }
+        - { in: query, name: cursor, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200': { description: Paged public listing summaries }
+  /listings/{listingId}:
+    get:
+      security: []
+      summary: Return public listing and eligible business details
+      parameters:
+        - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Public listing details }
+        '404': { description: Not found or not publicly eligible }
+  /seller/business:
+    get:
+      summary: Read the signed-in seller's business
+      description: Exact business address and coordinates are returned only to the owning seller, never in public listing responses.
+      responses:
+        '200': { description: Own business or null }
+    put:
+      summary: Create or update the seller's single business profile
+      description: Geocodes the private business address, or town if no address is supplied, for nearby-market search.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, province]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                description: { type: string, maxLength: 3000 }
+                address: { type: [string, 'null'], maxLength: 250 }
+                province: { type: string, enum: [Eastern Cape, Free State, Gauteng, KwaZulu-Natal, Limpopo, Mpumalanga, Northern Cape, North West, Western Cape] }
+                town: { type: [string, 'null'], maxLength: 100 }
+                contactEmail: { type: [string, 'null'], format: email }
+                contactPhone: { type: [string, 'null'], maxLength: 30 }
+                whatsappPhone: { type: [string, 'null'], maxLength: 30 }
+      responses:
+        '200': { description: Business saved }
+        '400': { description: Invalid input or business address could not be located }
+        '503': { description: Geocoding is unavailable or not configured }
+  /seller/listings:
+    get:
+      summary: List own listings
+      responses:
+        '200': { description: Own listings }
+    post:
+      summary: Create a draft listing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [categoryId, produceTypeId, title, description, province, type]
+              properties:
+                categoryId: { type: string, format: uuid }
+                produceTypeId: { type: string, format: uuid }
+                title: { type: string, minLength: 3, maxLength: 120 }
+                description: { type: string, minLength: 10, maxLength: 5000 }
+                province: { type: string }
+                town: { type: [string, 'null'], maxLength: 100 }
+                type: { type: string, enum: [product, service] }
+                active: { type: boolean, default: true }
+                inStock: { type: boolean, default: true }
+                expiresAt: { type: [string, 'null'], format: date-time }
+      responses:
+        '201': { description: Draft listing created }
+  /seller/produce-types:
+    get:
+      summary: List active produce types for seller listing forms
+      parameters:
+        - { in: query, name: categoryId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Active produce types for the selected category }
+        '401': { description: Authentication required }
+        '403': { description: Seller role required }
+  /seller/listings/{listingId}:
+    put:
+      summary: Update an owned listing without moderation fields
+      parameters:
+        - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Listing updated }
+        '404': { description: Listing not owned or unavailable }
+  /seller/listings/{listingId}/images:
+    post:
+      summary: Upload validated listing photos with descriptive alt text
+      parameters:
+        - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [images, altTexts]
+              properties:
+                images: { type: array, items: { type: string, format: binary }, maxItems: 5 }
+                altTexts: { type: string, description: JSON array with one descriptive alt text per image }
+      responses:
+        '201': { description: Photos saved; public access still depends on listing publication }
+        '413': { description: Image too large }
+        '503': { description: Object storage not configured }
+  /seller/listings/{listingId}/submit:
+    post:
+      summary: Submit a draft listing for review
+      parameters:
+        - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Listing submitted }
+  /seller/verification:
+    get:
+      summary: Read own verification status and seller-safe feedback
+      responses:
+        '200': { description: Safe submission status; no private storage keys }
+    post:
+      summary: Submit private supporting documents
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                documents: { type: array, items: { type: string, format: binary }, maxItems: 5 }
+      responses:
+        '201': { description: Verification submitted }
+        '413': { description: File too large }
+        '503': { description: Storage not configured }
+  /enquiries:
+    post:
+      summary: Create an authenticated buyer enquiry
+      parameters:
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201': { description: Enquiry created }
+        '409': { description: Idempotency conflict }
+        '429': { description: Rate limit exceeded }
+  /enquiries/mine:
+    get:
+      summary: List only the buyer's enquiries
+      responses:
+        '200': { description: Own enquiries }
+  /seller/enquiries:
+    get:
+      summary: List only enquiries for the seller's business
+      responses:
+        '200': { description: Own business inbox }
+  /seller/enquiries/{enquiryId}:
+    patch:
+      summary: Move an owned enquiry forward through allowed statuses
+      parameters:
+        - { in: path, name: enquiryId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Enquiry status updated }
+        '403': { description: Ownership or role denied }
+        '409': { description: Invalid state transition }
+  /admin/verifications:
+    get:
+      summary: List verification submissions for authorized review
+      responses:
+        '200': { description: Admin review queue; no raw storage keys }
+        '403': { description: Admin role required }
+  /admin/verifications/{verificationId}/decision:
+    post:
+      summary: Approve or reject and audit a pending verification submission
+      parameters:
+        - { in: path, name: verificationId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Decision recorded }
+        '403': { description: Admin role required }
+        '409': { description: Submission is no longer pending }
+  /admin/verifications/{verificationId}/documents/{documentIndex}:
+    get:
+      summary: Read one private verification file as an authorized administrator
+      parameters:
+        - { in: path, name: verificationId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: documentIndex, required: true, schema: { type: integer, minimum: 0, maximum: 4 } }
+      responses:
+        '200': { description: No-store private document response }
+        '403': { description: Admin role required }
+  /admin/listings:
+    get:
+      summary: List pending listings for admin moderation
+      responses:
+        '200': { description: Pending listings }
+  /admin/listings/{listingId}/moderation:
+    patch:
+      summary: Publish, reject, or archive a listing with an audit record
+      parameters:
+        - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Moderation recorded }
+        '409': { description: Business is not approved for publication }
+  /admin/audit-logs:
+    get:
+      summary: Read recent restricted audit events
+      responses:
+        '200': { description: Audit events with minimal metadata }
+components:
+  securitySchemes:
+    accessCookie:
+      type: apiKey
+      in: cookie
+      name: agrimarket_access
+    bearerAccess:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
