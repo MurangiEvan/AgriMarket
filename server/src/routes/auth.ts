@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { compare, hash } from 'bcryptjs';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { Router, type Response } from 'express';
 
 import type { Database } from '../db/client.js';
-import { sessions, users } from '../db/schema.js';
+import { auditLogs, passwordResetTokens, sessions, users } from '../db/schema.js';
+import type { Mailer } from '../mailer.js';
 import { HttpError, asyncRoute } from '../http.js';
 import {
   ACCESS_COOKIE,
@@ -14,12 +15,111 @@ import {
   SESSION_COOKIE,
 } from '../middleware/auth.js';
 import { ACCESS_TOKEN_TTL_SECONDS, createAccessToken, REFRESH_TOKEN_TTL_MS } from '../session-tokens.js';
-import { loginSchema, refreshSchema, registrationSchema } from '../validation.js';
+import {
+  loginSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
+  refreshSchema,
+  registrationSchema,
+} from '../validation.js';
 
 type AuthUser = { id: string; email: string; role: 'buyer' | 'seller' | 'admin' };
 
-export function createAuthRouter(db: Database, secureCookie: boolean, sessionSecret: string): Router {
+export const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
+const PASSWORD_RESET_REQUESTED_MESSAGE = 'If an account exists for that email, a password reset link has been sent.';
+
+export type PasswordResetOptions = { mailer: Mailer; resetUrl: string };
+
+export function createAuthRouter(
+  db: Database,
+  secureCookie: boolean,
+  sessionSecret: string,
+  passwordReset: PasswordResetOptions,
+): Router {
   const router = Router();
+
+  router.post(
+    '/password-reset/request',
+    asyncRoute(async (request, response) => {
+      const input = passwordResetRequestSchema.parse(request.body);
+      const email = input.email.trim().toLowerCase();
+      const [user] = await db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(and(eq(users.email, email), eq(users.isActive, true)))
+        .limit(1);
+
+      if (user) {
+        const token = createSessionToken();
+        await db.transaction(async (transaction) => {
+          // Only the newest link works.
+          await transaction
+            .update(passwordResetTokens)
+            .set({ usedAt: new Date() })
+            .where(and(eq(passwordResetTokens.userId, user.id), isNull(passwordResetTokens.usedAt)));
+          await transaction.insert(passwordResetTokens).values({
+            userId: user.id,
+            tokenHash: hashSessionToken(token, sessionSecret),
+            expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+          });
+        });
+        const link = new URL(passwordReset.resetUrl);
+        link.searchParams.set('token', token);
+        try {
+          await passwordReset.mailer.sendPasswordReset(user.email, link.toString());
+        } catch (error) {
+          // Same response either way so the endpoint cannot be used to discover accounts.
+          console.error('Password reset email could not be sent:', error instanceof Error ? error.message : error);
+        }
+      }
+
+      response.status(202).json({ data: { message: PASSWORD_RESET_REQUESTED_MESSAGE } });
+    }),
+  );
+
+  router.post(
+    '/password-reset/confirm',
+    asyncRoute(async (request, response) => {
+      const input = passwordResetConfirmSchema.parse(request.body);
+      const passwordHash = await hash(input.password, 12);
+      const updated = await db.transaction(async (transaction) => {
+        const [resetToken] = await transaction
+          .update(passwordResetTokens)
+          .set({ usedAt: new Date() })
+          .where(
+            and(
+              eq(passwordResetTokens.tokenHash, hashSessionToken(input.token, sessionSecret)),
+              isNull(passwordResetTokens.usedAt),
+              gt(passwordResetTokens.expiresAt, new Date()),
+            ),
+          )
+          .returning({ userId: passwordResetTokens.userId });
+        if (!resetToken) return false;
+
+        const [user] = await transaction
+          .update(users)
+          .set({ passwordHash, updatedAt: new Date() })
+          .where(and(eq(users.id, resetToken.userId), eq(users.isActive, true)))
+          .returning({ id: users.id });
+        if (!user) return false;
+
+        await transaction.delete(sessions).where(eq(sessions.userId, user.id));
+        await transaction.insert(auditLogs).values({
+          actorId: user.id,
+          action: 'user.password_reset',
+          targetType: 'user',
+          targetId: user.id,
+          metadata: { method: 'email_link' },
+        });
+        return true;
+      });
+
+      if (!updated) {
+        throw new HttpError(400, 'INVALID_RESET_TOKEN', 'This password reset link is invalid or has expired. Request a new one.');
+      }
+      response.json({ data: { message: 'Your password has been reset. Sign in with your new password.' } });
+    }),
+  );
 
   router.post(
     '/register',

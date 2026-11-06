@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`. JSON request/response bodies use UTF-8. Errors use `{ "error": { "code": "...", "message": "...", "details": [] } }`; details must not contain secrets or private records. Collection responses are bounded and paginated with `limit` and `cursor` (or an explicitly documented page scheme). OpenAPI source is `server/openapi.yaml`.
 
-Browser authentication uses opaque server-side sessions in HttpOnly cookies. Tokens are HMAC-hashed with `SESSION_SECRET` in the database; production cookies use Secure/SameSite=None and local HTTP uses SameSite=Lax. Mutating cookie-authenticated requests require an allowlisted Origin. Role and ownership checks occur on the server. Email verification/password reset routes are not implemented or operational until a mail provider is configured.
+Browser authentication uses opaque server-side sessions in HttpOnly cookies. Tokens are HMAC-hashed with `SESSION_SECRET` in the database; production cookies use Secure/SameSite=None and local HTTP uses SameSite=Lax. Mutating cookie-authenticated requests require an allowlisted Origin. Role and ownership checks occur on the server. Password reset emails are sent through Brevo (`BREVO_API_KEY`, `MAIL_FROM_EMAIL`, optional `MAIL_FROM_NAME` and `PASSWORD_RESET_URL`); without a key in development the reset link is printed to the server console. Reset tokens are HMAC-hashed, single-use, expire after 30 minutes, and a successful reset revokes all of the user's sessions and writes a `user.password_reset` audit event. Email verification is not implemented.
 
 ## Endpoint Groups
 
@@ -14,6 +14,8 @@ Browser authentication uses opaque server-side sessions in HttpOnly cookies. Tok
 | POST | `/auth/login` | Public, rate-limited | Start session |
 | POST | `/auth/logout` | Signed in | Revoke own session |
 | GET | `/auth/me` | Signed in | Current safe user/profile summary |
+| POST | `/auth/password-reset/request` | Public, rate-limited | Email a reset link; same response whether or not the account exists |
+| POST | `/auth/password-reset/confirm` | Public, rate-limited | Set a new password with a valid token; revokes all sessions |
 | GET | `/categories` | Public | Active categories |
 | GET | `/market/categories` | Buyer | Controlled categories with active produce types |
 | GET | `/market/produce` | Buyer | Search category produce availability by radius; returns listing counts and rounded distances only |

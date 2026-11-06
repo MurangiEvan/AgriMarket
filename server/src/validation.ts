@@ -26,6 +26,12 @@ export const loginSchema = z
   .object({ email: z.email().max(254), password: z.string().min(1).max(128) })
   .strict();
 
+export const passwordResetRequestSchema = z.object({ email: z.email().max(254) }).strict();
+
+export const passwordResetConfirmSchema = z
+  .object({ token: z.string().min(32).max(128), password: z.string().min(10).max(128) })
+  .strict();
+
 export const refreshSchema = z.object({ refreshToken: z.string().min(32).max(128).optional() }).strict();
 
 export const businessSchema = z

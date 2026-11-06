@@ -1,9 +1,10 @@
 import { roundCoordinate } from './market-flow';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 
-const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1').replace(/\/$/, '');
+const API_BASE_URL = resolveApiBaseUrl((process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1').replace(/\/$/, ''));
 const REFRESH_TOKEN_KEY = 'agrimarket-refresh-token';
 let accessToken: string | null = null;
 let refreshInFlight: Promise<boolean> | null = null;
@@ -57,6 +58,34 @@ export type PublicBusiness = {
   whatsappPhone: string | null;
   verified: boolean;
 };
+
+// In local development the computer's LAN address changes with the network, so follow the host the app
+// was actually loaded from instead of a fixed IP in .env:
+// - web: the page's host (also keeps SameSite=Lax session cookies same-site)
+// - phone: the Expo dev server host the phone is already connected to
+function resolveApiBaseUrl(configured: string): string {
+  const devHost =
+    Platform.OS === 'web'
+      ? (typeof window === 'undefined' ? undefined : window.location.hostname)
+      : Constants.expoConfig?.hostUri?.split(':')[0];
+  if (!devHost) return configured;
+  try {
+    const api = new URL(configured);
+    if (api.hostname !== devHost && isLocalDevelopmentHost(api.hostname) && isLocalDevelopmentHost(devHost)) {
+      api.hostname = devHost;
+      return api.toString().replace(/\/$/, '');
+    }
+  } catch {
+    // Fall back to the configured URL.
+  }
+  return configured;
+}
+
+function isLocalDevelopmentHost(hostname: string) {
+  if (['localhost', '127.0.0.1', '[::1]'].includes(hostname)) return true;
+  const [a, b] = hostname.split('.').map(Number);
+  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
 
 export function apiResourceUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/api\/v1\/?$/, '')}${path}`;
@@ -117,7 +146,9 @@ async function performRequest(path: string, init: RequestInit): Promise<Response
       },
     });
   } catch {
-    throw new ApiError('AgriMarket could not reach the service. Check your connection and try again.');
+    throw new ApiError(
+      'AgriMarket could not reach the service. Check that your phone and computer are on the same Wi-Fi and that the API is running.',
+    );
   }
 }
 
@@ -134,7 +165,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 function isAuthEntryPath(path: string) {
-  return ['/auth/login', '/auth/register', '/auth/refresh'].some((entry) => path.startsWith(entry));
+  return ['/auth/login', '/auth/register', '/auth/refresh', '/auth/password-reset'].some((entry) => path.startsWith(entry));
 }
 
 async function hasRefreshCredential() {
@@ -218,7 +249,7 @@ export async function getBuyerLocation() {
 export async function searchBuyerLocations(queryText: string) {
   ensureSecureLocationApi();
   const query = new URLSearchParams({ q: queryText });
-  return apiRequest<{ locations: LocationCandidate[] }>(`/buyer/location/search?${query.toString()}`);
+  return apiRequest<{ locations: LocationCandidate[]; attribution?: string }>(`/buyer/location/search?${query.toString()}`);
 }
 
 export async function saveBuyerLocation(location: BuyerLocation) {
@@ -240,10 +271,22 @@ function ensureSecureLocationApi() {
 
 function ensureSecureApi(message = 'AgriMarket account and data requests require a secure HTTPS connection.') {
   const apiUrl = new URL(API_BASE_URL);
-  const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(apiUrl.hostname);
-  if (apiUrl.protocol !== 'https:' && !localHost) {
+  const loopbackHost = ['localhost', '127.0.0.1', '[::1]'].includes(apiUrl.hostname);
+  const localDevelopmentHost = loopbackHost || isPrivateIpv4Address(apiUrl.hostname);
+  if (apiUrl.protocol !== 'https:' && !(process.env.NODE_ENV === 'development' && localDevelopmentHost)) {
     throw new ApiError(message);
   }
+}
+
+function isPrivateIpv4Address(hostname: string) {
+  const octets = hostname.split('.').map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+
+  const first = octets[0];
+  const second = octets[1];
+  return first === 10 || (first === 192 && second === 168) || (first === 172 && second !== undefined && second >= 16 && second <= 31);
 }
 
 export async function getListings(filters: { q?: string; category?: string; produceTypeId?: string; province?: string; cursor?: string } = {}) {
@@ -282,6 +325,22 @@ export async function register(email: string, password: string, role: 'buyer' | 
   return result.user;
 }
 
+export async function requestPasswordReset(email: string): Promise<string> {
+  const result = await apiRequest<{ message: string }>('/auth/password-reset/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+  return result.message;
+}
+
+export async function confirmPasswordReset(token: string, password: string): Promise<string> {
+  const result = await apiRequest<{ message: string }>('/auth/password-reset/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  });
+  return result.message;
+}
+
 async function saveNativeCredentials(result: { accessToken?: string; refreshToken?: string }) {
   if (Platform.OS !== 'web') {
     if (!result.accessToken || !result.refreshToken) throw new ApiError('The sign-in response was incomplete.');
@@ -291,7 +350,19 @@ async function saveNativeCredentials(result: { accessToken?: string; refreshToke
 }
 
 export async function signOut(): Promise<void> {
-  await apiRequest('/auth/logout', { method: 'POST' });
-  accessToken = null;
-  await clearNativeRefreshToken();
+  if (Platform.OS === 'web') {
+    // Web credentials are HttpOnly cookies that only the server can clear.
+    await apiRequest('/auth/logout', { method: 'POST' });
+    return;
+  }
+  // On a phone the credentials live on the device, so always remove them, even when the
+  // server cannot be reached; revoking the server session is best effort.
+  try {
+    await apiRequest('/auth/logout', { method: 'POST' });
+  } catch {
+    // Offline or session already gone: the local credentials are still removed below.
+  } finally {
+    accessToken = null;
+    await clearNativeRefreshToken();
+  }
 }

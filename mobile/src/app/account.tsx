@@ -1,8 +1,12 @@
 import { Link } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { ApiError, apiRequest, getCategories, getSellerProduceTypes, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
+import { ApiError, apiRequest, apiResourceUrl, getCategories, getSellerProduceTypes, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
+import { categoryColor, categoryIcon, produceIcon } from '@/constants/produce-icons';
 import { useSession } from '@/components/session-provider';
 
 type BusinessProfile = {
@@ -20,8 +24,24 @@ type BusinessProfile = {
 
 type SellerListing = { id: string; title: string; description: string; categoryId: string; produceTypeId: string; active: boolean; inStock: boolean; expiresAt: string | null; type: 'product' | 'service'; town: string | null; status: string; province: string; images?: { id: string; altText: string; url: string }[] };
 type Verification = { verificationStatus: string; submissions: { id: string; status: string; sellerFeedback: string | null; submittedAt: string }[] };
+type NativeUploadFile = { uri: string; name: string; type: string };
+type ListingPhotoDraft = NativeUploadFile & { file?: File };
 
 const provinces = ['Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'Northern Cape', 'North West', 'Western Cape'];
+
+function appendNativeUpload(form: FormData, field: string, file: NativeUploadFile) {
+  // React Native FormData accepts URI parts; the web DOM type only declares Blob inputs.
+  const nativeForm = form as FormData & { append(name: string, value: NativeUploadFile): void };
+  nativeForm.append(field, file);
+}
+
+function appendListingPhoto(form: FormData, photo: ListingPhotoDraft) {
+  if (photo.file) {
+    form.append('images', photo.file, photo.name);
+    return;
+  }
+  appendNativeUpload(form, 'images', photo);
+}
 
 export default function AccountScreen() {
   const { user, signOut } = useSession();
@@ -61,7 +81,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [listings, setListings] = useState<SellerListing[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [produceTypes, setProduceTypes] = useState<SellerProduceType[]>([]);
+  const [loadedProduceTypes, setLoadedProduceTypes] = useState<{ categoryId: string; items: SellerProduceType[] }>({ categoryId: '', items: [] });
   const [verification, setVerification] = useState<Verification | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -71,21 +91,24 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [whatsappPhone, setWhatsappPhone] = useState('');
-  const [listingTitle, setListingTitle] = useState('');
-  const [listingDescription, setListingDescription] = useState('');
-  const [listingProvince, setListingProvince] = useState('Limpopo');
-  const [listingTown, setListingTown] = useState('');
-  const [listingType, setListingType] = useState<'product' | 'service'>('product');
   const [categoryId, setCategoryId] = useState('');
+  const produceTypes = loadedProduceTypes.categoryId === categoryId ? loadedProduceTypes.items : [];
+  const produceTypesLoading = Boolean(categoryId) && loadedProduceTypes.categoryId !== categoryId;
   const [produceTypeId, setProduceTypeId] = useState('');
-  const [listingActive, setListingActive] = useState(true);
-  const [listingInStock, setListingInStock] = useState(true);
-  const [listingExpiryDate, setListingExpiryDate] = useState('');
-  const [editingListingId, setEditingListingId] = useState<string | null>(null);
-  const [imageAltText, setImageAltText] = useState<Record<string, string>>({});
+  const selectedCategorySlug = categories.find((item) => item.id === categoryId)?.slug ?? '';
+  const visibleListings = listings.filter((listing) => listing.status !== 'archived');
+  const [listingPhotoDraft, setListingPhotoDraft] = useState<ListingPhotoDraft | null>(null);
+  const [photoNote, setPhotoNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    const previewUri = listingPhotoDraft?.uri;
+    return () => {
+      if (previewUri?.startsWith('blob:')) URL.revokeObjectURL(previewUri);
+    };
+  }, [listingPhotoDraft?.uri]);
 
   async function refresh() {
     const [businessResult, listingResult, verificationResult, categoryResult] = await Promise.all([
@@ -125,8 +148,12 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       return () => { active = false; };
     }
     getSellerProduceTypes(categoryId)
-      .then((result) => active && setProduceTypes(result))
-      .catch((cause: unknown) => active && setError(cause instanceof ApiError ? cause.message : 'Produce types could not be loaded.'));
+      .then((result) => active && setLoadedProduceTypes({ categoryId, items: result }))
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setLoadedProduceTypes({ categoryId, items: [] });
+        setError(cause instanceof ApiError ? cause.message : 'Produce types could not be loaded.');
+      });
     return () => { active = false; };
   }, [categoryId]);
 
@@ -154,105 +181,142 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     }, 'Business profile saved.');
   }
 
-  async function saveListing() {
-    if (listingExpiryDate.trim() && !isValidDateOnly(listingExpiryDate.trim())) {
-      setError('Enter an expiry date in YYYY-MM-DD format.');
+  async function addProducePhoto() {
+    const produceType = produceTypes.find((item) => item.id === produceTypeId);
+    const category = categories.find((item) => item.id === categoryId);
+    if (!business) {
+      setError('Save your business profile above before adding produce photos.');
       return;
     }
+    if (!category || !produceType || !listingPhotoDraft) {
+      setError('Choose a category, the produce type, and a photo.');
+      return;
+    }
+    const note = photoNote.trim();
+    const place = business.town ? ` in ${business.town}` : '';
     await runAction(async () => {
-      const expiresAt = listingExpiryDate.trim()
-        ? new Date(`${listingExpiryDate.trim()}T23:59:59.999+02:00`).toISOString()
-        : null;
-      await apiRequest(editingListingId ? `/seller/listings/${editingListingId}` : '/seller/listings', {
-        method: editingListingId ? 'PUT' : 'POST',
+      // Each photo is stored as a listing so it appears in the buyer market under its produce type.
+      const created = await apiRequest<{ listing: { id: string } }>('/seller/listings', {
+        method: 'POST',
         body: JSON.stringify({
           categoryId,
           produceTypeId,
-          title: listingTitle,
-          description: listingDescription,
-          province: listingProvince,
-          town: listingTown || null,
-          type: listingType,
-          active: listingActive,
-          inStock: listingInStock,
-          expiresAt,
+          title: produceType.name.length >= 3 ? produceType.name : `${produceType.name} produce`,
+          description: note.length >= 10 ? note : `${produceType.name} from ${business.name}${place}.${note ? ` ${note}` : ''}`,
+          province: business.province,
+          town: business.town,
+          type: category.slug === 'agricultural-services' ? 'service' : 'product',
         }),
       });
-      setListingTitle('');
-      setListingDescription('');
-      setListingTown('');
-      setProduceTypeId('');
-      setListingActive(true);
-      setListingInStock(true);
-      setListingExpiryDate('');
-      setEditingListingId(null);
-    }, editingListingId ? 'Listing changes saved.' : 'Draft listing created. Submit it for review when it is ready.');
-  }
-
-  function editListing(listing: SellerListing) {
-    setEditingListingId(listing.id);
-    setListingTitle(listing.title);
-    setListingDescription(listing.description);
-    setListingProvince(listing.province);
-    setListingTown(listing.town ?? '');
-    setListingType(listing.type);
-    setCategoryId(listing.categoryId);
-    setProduceTypeId(listing.produceTypeId);
-    setListingActive(listing.active);
-    setListingInStock(listing.inStock);
-    setListingExpiryDate(listing.expiresAt?.slice(0, 10) ?? '');
+      const listingId = created.listing.id;
+      try {
+        const form = new FormData();
+        appendListingPhoto(form, listingPhotoDraft);
+        form.append('altTexts', JSON.stringify([`${produceType.name} from ${business.name}`.slice(0, 180)]));
+        await apiRequest(`/seller/listings/${listingId}/images`, { method: 'POST', body: form });
+      } catch (cause) {
+        // Don't leave a photo-less entry behind if the upload failed.
+        await apiRequest(`/seller/listings/${listingId}/archive`, { method: 'POST' }).catch(() => undefined);
+        throw cause;
+      }
+      await apiRequest(`/seller/listings/${listingId}/submit`, { method: 'POST' });
+      setListingPhotoDraft(null);
+      setPhotoNote('');
+    }, 'Photo added and sent to the admin for review. It goes live for buyers once approved.');
   }
 
   async function submitListing(id: string) {
-    await runAction(async () => { await apiRequest(`/seller/listings/${id}/submit`, { method: 'POST' }); }, 'Listing submitted for review.');
+    await runAction(async () => { await apiRequest(`/seller/listings/${id}/submit`, { method: 'POST' }); }, 'Photo sent to the admin for review.');
   }
 
-  async function chooseListingImage(listing: SellerListing) {
-    const altText = imageAltText[listing.id]?.trim() ?? '';
-    if (altText.length < 5) {
-      setError('Write a short description for the image before uploading it.');
-      return;
-    }
-    if (Platform.OS !== 'web') {
-      setError('Listing photo uploads are available in the AgriMarket web app.');
-      return;
-    }
-    const picker = document.createElement('input');
-    picker.type = 'file';
-    picker.accept = 'image/jpeg,image/png,image/webp';
-    picker.onchange = () => {
-      const file = picker.files?.[0];
-      if (!file) return;
-      void runAction(async () => {
-        const form = new FormData();
-        form.append('images', file);
-        form.append('altTexts', JSON.stringify([altText]));
-        await apiRequest(`/seller/listings/${listing.id}/images`, { method: 'POST', body: form });
-        setImageAltText((current) => ({ ...current, [listing.id]: '' }));
-      }, 'Listing photo uploaded.');
-    };
-    picker.click();
+  async function removeProducePhoto(id: string) {
+    await runAction(async () => { await apiRequest(`/seller/listings/${id}/archive`, { method: 'POST' }); }, 'Photo removed. Buyers will no longer see it.');
   }
+
+  async function chooseNewListingPhoto() {
+    if (Platform.OS === 'web') {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.accept = 'image/jpeg,image/png,image/webp';
+      picker.onchange = () => {
+        const file = picker.files?.[0];
+        if (file) setListingPhotoDraft({ uri: URL.createObjectURL(file), name: file.name, type: file.type || 'image/jpeg', file });
+      };
+      picker.click();
+      return;
+    }
+
+    try {
+      const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] });
+      const image = selection.canceled ? undefined : selection.assets[0];
+      if (!image) return;
+      const extension = image.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+      setListingPhotoDraft({
+        uri: image.uri,
+        name: image.fileName ?? `listing-image.${extension}`,
+        type: image.mimeType ?? 'image/jpeg',
+      });
+    } catch {
+      setError('The photo library could not be opened. Check the app permissions and try again.');
+    }
+  }
+
 
   async function chooseDocuments() {
-    if (Platform.OS !== 'web') {
-      setError('Verification uploads are available in the AgriMarket web app.');
+    if (Platform.OS === 'web') {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.accept = 'application/pdf,image/jpeg,image/png';
+      picker.multiple = true;
+      picker.onchange = () => {
+        const files = Array.from(picker.files ?? []);
+        if (!files.length) return;
+        if (files.length > 5) {
+          setError('Choose no more than five verification documents.');
+          return;
+        }
+        void runAction(async () => {
+          const form = new FormData();
+          files.forEach((file) => form.append('documents', file));
+          await apiRequest('/seller/verification', { method: 'POST', body: form });
+        }, 'Verification documents submitted for review.');
+      };
+      picker.click();
       return;
     }
-    const picker = document.createElement('input');
-    picker.type = 'file';
-    picker.accept = 'application/pdf,image/jpeg,image/png';
-    picker.multiple = true;
-    picker.onchange = () => {
-      const files = Array.from(picker.files ?? []).slice(0, 5);
-      if (!files.length) return;
+
+    try {
+      const selection = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/jpeg', 'image/png'],
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (selection.canceled) return;
+      if (selection.assets.length > 5) {
+        setError('Choose no more than five verification documents.');
+        return;
+      }
+      if (!selection.assets.length) return;
       void runAction(async () => {
         const form = new FormData();
-        files.forEach((file) => form.append('documents', file));
+        selection.assets.forEach((file) => {
+          const extension = file.name.split('.').pop()?.toLowerCase();
+          const fallbackMimeType = extension === 'pdf'
+            ? 'application/pdf'
+            : extension === 'png'
+              ? 'image/png'
+              : 'image/jpeg';
+          appendNativeUpload(form, 'documents', {
+            uri: file.uri,
+            name: file.name,
+            type: file.mimeType ?? fallbackMimeType,
+          });
+        });
         await apiRequest('/seller/verification', { method: 'POST', body: form });
       }, 'Verification documents submitted for review.');
-    };
-    picker.click();
+    } catch {
+      setError('The document picker could not be opened. Try again or choose another file.');
+    }
   }
 
   return (
@@ -271,51 +335,60 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       <Pressable accessibilityRole="button" disabled={busy || name.trim().length < 2} onPress={saveBusiness} style={[styles.primaryButton, busy && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Saving…' : 'Save business profile'}</Text></Pressable>
 
       <View style={styles.rule} />
-      <Text style={styles.sectionTitle}>Your listings</Text>
-      {listings.map((listing) => <View key={listing.id} style={styles.listItem}>
-        <View style={styles.listItemMain}>
-          <Text style={styles.listItemTitle}>{listing.title}</Text>
-          <Text style={styles.muted}>{listing.province} · {formatStatus(listing.status)} · {listing.images?.length ?? 0}/5 photos</Text>
-          {(listing.images?.length ?? 0) < 5 && listing.status !== 'archived' ? <>
-            <TextInput accessibilityLabel={`Alt text for ${listing.title} photo`} placeholder="Describe the photo for screen readers" value={imageAltText[listing.id] ?? ''} onChangeText={(value) => setImageAltText((current) => ({ ...current, [listing.id]: value }))} style={styles.input} />
-            <Pressable accessibilityRole="button" disabled={busy} onPress={() => chooseListingImage(listing)} style={styles.smallButton}><Text style={styles.smallButtonText}>Add photo</Text></Pressable>
-          </> : null}
+      <Text style={styles.sectionTitle}>Your produce photos</Text>
+      <Text style={styles.muted}>Add a photo of what you sell and choose what it is. Each photo is checked by the admin, then shown to buyers in the market under that produce.</Text>
+      {visibleListings.length === 0 ? <Text style={styles.helper}>No photos yet. Add your first one below.</Text> : (
+        <View style={styles.photoGrid}>
+          {visibleListings.map((listing) => {
+            const slug = categories.find((item) => item.id === listing.categoryId)?.slug ?? '';
+            const photo = listing.status === 'published' ? listing.images?.[0] : undefined;
+            const status = photoStatus(listing.status);
+            return (
+              <View key={listing.id} style={styles.photoCard}>
+                {photo ? (
+                  <Image accessibilityLabel={photo.altText} source={{ uri: apiResourceUrl(photo.url) }} contentFit="cover" style={styles.photoCardImage} />
+                ) : (
+                  <View style={[styles.photoCardImage, styles.photoCardPlaceholder, { backgroundColor: categoryColor(slug) }]}>
+                    <Text accessible={false} style={styles.photoCardIcon}>{produceIcon(listing.title, slug)}</Text>
+                  </View>
+                )}
+                <Text style={styles.listItemTitle} numberOfLines={1}>{listing.title}</Text>
+                <Text style={[styles.photoStatus, { color: status.color }]}>{status.label}</Text>
+                <View style={styles.listingActions}>
+                  {listing.status === 'draft' || listing.status === 'rejected' ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => submitListing(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Send for review</Text></Pressable> : null}
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${listing.title} photo`} disabled={busy} onPress={() => removeProducePhoto(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Remove</Text></Pressable>
+                </View>
+              </View>
+            );
+          })}
         </View>
-          {listing.status !== 'archived' && <View style={styles.listingActions}>
-            <Pressable accessibilityRole="button" disabled={busy} onPress={() => editListing(listing)} style={styles.smallButton}><Text style={styles.smallButtonText}>Edit</Text></Pressable>
-            {listing.status === 'draft' && <Pressable accessibilityRole="button" disabled={busy} onPress={() => submitListing(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Submit</Text></Pressable>}
-          </View>}
-      </View>)}
-      {listings.length === 0 && <Text style={styles.muted}>No listings yet. Create your first listing below.</Text>}
-      <Text style={styles.fieldLabel}>Listing title</Text><TextInput accessibilityLabel="Listing title" value={listingTitle} onChangeText={setListingTitle} style={styles.input} />
-      <Text style={styles.fieldLabel}>Description</Text><TextInput accessibilityLabel="Listing description" multiline value={listingDescription} onChangeText={setListingDescription} style={[styles.input, styles.multiline]} />
-      <Text style={styles.fieldLabel}>Category</Text>
-      <View style={styles.choiceWrap}>{categories.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: categoryId === item.id }} onPress={() => { setCategoryId(item.id); setProduceTypeId(''); }} style={[styles.choice, categoryId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, categoryId === item.id && styles.choiceTextActive]}>{item.name}</Text></Pressable>)}</View>
-      <Text style={styles.fieldLabel}>Produce type</Text>
-      <View style={styles.choiceWrap}>{produceTypes.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: produceTypeId === item.id }} onPress={() => setProduceTypeId(item.id)} style={[styles.choice, produceTypeId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, produceTypeId === item.id && styles.choiceTextActive]}>{item.name}</Text></Pressable>)}</View>
-      <Text style={styles.fieldLabel}>Listing type</Text><View style={styles.segment}>{(['product', 'service'] as const).map((item) => <Pressable key={item} accessibilityRole="button" accessibilityState={{ selected: listingType === item }} onPress={() => setListingType(item)} style={[styles.segmentButton, listingType === item && styles.segmentActive]}><Text style={[styles.segmentText, listingType === item && styles.segmentTextActive]}>{item}</Text></Pressable>)}</View>
-      <Text style={styles.fieldLabel}>Province</Text><ProvincePicker selected={listingProvince} onSelect={setListingProvince} />
-      <Text style={styles.fieldLabel}>Town or area</Text><TextInput accessibilityLabel="Listing town or area" value={listingTown} onChangeText={setListingTown} style={styles.input} />
-      <Text style={styles.fieldLabel}>Listing status</Text>
-      <View style={styles.segment}>
-        <Pressable accessibilityRole="button" accessibilityState={{ selected: listingActive }} onPress={() => setListingActive(true)} style={[styles.segmentButton, listingActive && styles.segmentActive]}><Text style={[styles.segmentText, listingActive && styles.segmentTextActive]}>Active</Text></Pressable>
-        <Pressable accessibilityRole="button" accessibilityState={{ selected: !listingActive }} onPress={() => setListingActive(false)} style={[styles.segmentButton, !listingActive && styles.segmentActive]}><Text style={[styles.segmentText, !listingActive && styles.segmentTextActive]}>Inactive</Text></Pressable>
-      </View>
-      <Text style={styles.fieldLabel}>Stock status</Text>
-      <View style={styles.segment}>
-        <Pressable accessibilityRole="button" accessibilityState={{ selected: listingInStock }} onPress={() => setListingInStock(true)} style={[styles.segmentButton, listingInStock && styles.segmentActive]}><Text style={[styles.segmentText, listingInStock && styles.segmentTextActive]}>In stock</Text></Pressable>
-        <Pressable accessibilityRole="button" accessibilityState={{ selected: !listingInStock }} onPress={() => setListingInStock(false)} style={[styles.segmentButton, !listingInStock && styles.segmentActive]}><Text style={[styles.segmentText, !listingInStock && styles.segmentTextActive]}>Out of stock</Text></Pressable>
-      </View>
-      <Text style={styles.fieldLabel}>Expiry date (optional, YYYY-MM-DD)</Text><TextInput accessibilityLabel="Listing expiry date" placeholder="2026-12-31" value={listingExpiryDate} onChangeText={setListingExpiryDate} style={styles.input} />
-      {listingTitle.trim() ? <View style={styles.preview}><Text style={styles.previewLabel}>LISTING PREVIEW</Text><Text style={styles.previewTitle}>{listingTitle}</Text><Text style={styles.muted}>{[listingTown, listingProvince].filter(Boolean).join(', ')} · {categories.find((item) => item.id === categoryId)?.name ?? 'Choose a category'}</Text><Text style={styles.previewDescription}>{listingDescription || 'Your description will appear here.'}</Text></View> : null}
-      <Pressable accessibilityRole="button" disabled={busy || !categoryId || !produceTypeId || listingTitle.trim().length < 3 || listingDescription.trim().length < 10} onPress={saveListing} style={[styles.primaryButton, busy && styles.disabled]}><Text style={styles.primaryText}>{editingListingId ? 'Save listing changes' : 'Create draft listing'}</Text></Pressable>
-      {editingListingId ? <Pressable accessibilityRole="button" onPress={() => { setEditingListingId(null); setListingTitle(''); setListingDescription(''); setListingTown(''); }} style={styles.textButton}><Text style={styles.linkText}>Cancel editing</Text></Pressable> : null}
+      )}
+
+      <Text style={styles.fieldLabel}>1. Category</Text>
+      <View style={styles.choiceWrap}>{categories.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: categoryId === item.id }} onPress={() => { setCategoryId(item.id); setProduceTypeId(''); }} style={[styles.choice, categoryId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, categoryId === item.id && styles.choiceTextActive]}>{categoryIcon(item.slug)} {item.name}</Text></Pressable>)}</View>
+      <Text style={styles.fieldLabel}>2. What is it?</Text>
+      <View style={styles.choiceWrap}>{produceTypes.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: produceTypeId === item.id }} onPress={() => setProduceTypeId(item.id)} style={[styles.choice, produceTypeId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, produceTypeId === item.id && styles.choiceTextActive]}>{produceIcon(item.name, selectedCategorySlug)} {item.name}</Text></Pressable>)}</View>
+      {produceTypes.length === 0 ? <Text style={styles.helper}>{produceTypesLoading ? 'Loading produce types…' : 'No produce types are available for this category yet.'}</Text> : null}
+      <Text style={styles.fieldLabel}>3. Photo</Text>
+      {listingPhotoDraft ? <View style={styles.photoPreview}>
+        <Image accessibilityLabel="Selected produce photo preview" source={{ uri: listingPhotoDraft.uri }} contentFit="cover" style={styles.photoPreviewImage} />
+        <View style={styles.photoPreviewFields}>
+          <Text style={styles.muted} numberOfLines={1}>{listingPhotoDraft.name}</Text>
+          <Pressable accessibilityRole="button" onPress={() => setListingPhotoDraft(null)} style={styles.smallButton}><Text style={styles.smallButtonText}>Choose a different photo</Text></Pressable>
+        </View>
+      </View> : <Pressable accessibilityRole="button" disabled={busy} onPress={() => void chooseNewListingPhoto()} style={styles.secondaryButton}><Text style={styles.secondaryText}>Choose photo</Text></Pressable>}
+      <Text style={styles.helper}>JPEG, PNG or WebP. A clear, well-lit photo helps buyers.</Text>
+      <Text style={styles.fieldLabel}>Short note for buyers (optional)</Text>
+      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes, 10 kg boxes, harvested weekly" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
+      <Pressable accessibilityRole="button" disabled={busy || !business || !produceTypeId || !listingPhotoDraft} onPress={() => void addProducePhoto()} style={[styles.primaryButton, (busy || !business || !produceTypeId || !listingPhotoDraft) && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Uploading…' : 'Add photo'}</Text></Pressable>
+      {!business ? <Text style={styles.helper}>Save your business profile above before adding produce photos.</Text> : null}
 
       <View style={styles.rule} />
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Verification</Text><Text style={styles.statusTag}>{formatStatus(verification?.verificationStatus ?? 'not_submitted')}</Text></View>
-      <Text style={styles.muted}>Documents are private and can only be reviewed by an authorized administrator. Local uploads are for development only.</Text>
+      <Text style={styles.muted}>Documents are private and can only be reviewed by an authorized administrator. Uploads use the storage configured on the AgriMarket server.</Text>
       {verification?.submissions.map((submission) => <View key={submission.id} style={styles.feedbackBox}><Text style={styles.listItemTitle}>{formatStatus(submission.status)} · {new Date(submission.submittedAt).toLocaleDateString()}</Text>{submission.sellerFeedback ? <Text style={styles.muted}>{submission.sellerFeedback}</Text> : null}</View>)}
       {verification?.verificationStatus !== 'approved' && <Pressable accessibilityRole="button" disabled={busy || !business} onPress={chooseDocuments} style={[styles.secondaryButton, (!business || busy) && styles.disabled]}><Text style={styles.secondaryText}>Choose verification documents</Text></Pressable>}
+      {!business ? <Text style={styles.helper}>Save your business profile above before uploading verification documents.</Text> : null}
       <Text style={styles.helper}>PDF, JPEG, or PNG · maximum 5 documents, 10 MB each</Text>
       <Link href="/enquiries" style={styles.linkText}>Open seller enquiry inbox</Link>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
@@ -332,10 +405,11 @@ function formatStatus(value: string) {
   return value.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
 
-function isValidDateOnly(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+function photoStatus(status: string): { label: string; color: string } {
+  if (status === 'published') return { label: 'Live for buyers', color: '#235946' };
+  if (status === 'pending') return { label: 'Waiting for admin review', color: '#a05d3c' };
+  if (status === 'rejected') return { label: 'Rejected by admin', color: '#a12727' };
+  return { label: 'Not sent for review', color: '#526259' };
 }
 
 const styles = StyleSheet.create({
@@ -353,6 +427,15 @@ const styles = StyleSheet.create({
   input: { minHeight: 46, paddingHorizontal: 12, borderWidth: 1, borderColor: '#cbd5ca', borderRadius: 5, color: '#183f32', backgroundColor: '#fffefa' },
   multiline: { minHeight: 100, paddingTop: 12, textAlignVertical: 'top' },
   helper: { color: '#78867d', fontSize: 11, lineHeight: 17 },
+  photoPreview: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 6, backgroundColor: '#f3f5ed' },
+  photoPreviewImage: { width: 92, height: 92, borderRadius: 4, backgroundColor: '#e4eadf' },
+  photoPreviewFields: { flex: 1, gap: 7 },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  photoCard: { flexGrow: 1, flexBasis: 150, maxWidth: 220, gap: 6, padding: 10, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 8, backgroundColor: '#f7f9f4' },
+  photoCardImage: { width: '100%', aspectRatio: 1, borderRadius: 6, backgroundColor: '#e4eadf' },
+  photoCardPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  photoCardIcon: { fontSize: 44 },
+  photoStatus: { fontSize: 12, fontWeight: '700' },
   segment: { flexDirection: 'row', padding: 3, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 6, backgroundColor: '#edf0e8' },
   segmentButton: { minHeight: 39, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
   segmentActive: { backgroundColor: '#183f32' },

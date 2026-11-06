@@ -50,6 +50,13 @@
       "when": 1793696646510,
       "tag": "0006_goofy_lady_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793948868781,
+      "tag": "0007_gorgeous_nightmare",
+      "breakpoints": true
     }
   ]
 }

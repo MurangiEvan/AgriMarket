@@ -39,8 +39,8 @@ export function createBuyerRouter(db: Database, sessionSecret: string, googleMap
     '/location/search',
     asyncRoute(async (request, response) => {
       const query = locationSearchQuerySchema.parse(request.query);
-      const locations = await searchLocations(query.q, googleMapsApiKey);
-      response.json({ data: { locations } });
+      const result = await searchLocations(query.q, googleMapsApiKey);
+      response.json({ data: result });
     }),
   );
 

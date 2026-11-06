@@ -74,6 +74,43 @@ paths:
       summary: Revoke the current session
       responses:
         '204': { description: Session revoked }
+  /auth/password-reset/request:
+    post:
+      security: []
+      summary: Email a single-use password reset link (valid 30 minutes) via Brevo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        '202': { description: Same generic message whether or not the account exists }
+        '400': { description: Invalid input }
+        '429': { description: Rate limited }
+  /auth/password-reset/confirm:
+    post:
+      security: []
+      summary: Set a new password with a reset token; revokes all sessions and is audited
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              additionalProperties: false
+              properties:
+                token: { type: string, minLength: 32, maxLength: 128 }
+                password: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        '200': { description: Password reset }
+        '400': { description: INVALID_RESET_TOKEN or invalid input }
+        '429': { description: Rate limited }
   /auth/me:
     get:
       summary: Return the current safe user profile
@@ -280,6 +317,14 @@ paths:
         - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Listing submitted }
+  /seller/listings/{listingId}/archive:
+    post:
+      summary: Remove (archive) one of the seller's own listings so buyers no longer see it
+      parameters:
+        - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Listing archived }
+        '404': { description: Not found or not owned by this seller }
   /seller/verification:
     get:
       summary: Read own verification status and seller-safe feedback

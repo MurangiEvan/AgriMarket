@@ -42,7 +42,7 @@ export function createSellerRouter(
       const input = businessSchema.parse(request.body);
       const locationQuery = [input.address, input.town, input.province, 'South Africa'].filter(Boolean).join(', ');
       const location = input.address || input.town
-        ? (await searchLocations(locationQuery, googleMapsApiKey))[0]
+        ? (await searchLocations(locationQuery, googleMapsApiKey)).locations[0]
         : undefined;
       if ((input.address || input.town) && !location) {
         throw new HttpError(400, 'LOCATION_NOT_FOUND', 'The business address could not be located. Check the address or area and try again.');
@@ -240,6 +240,26 @@ export function createSellerRouter(
         )
         .returning({ id: listings.id, status: listings.status });
       if (!listing) throw new HttpError(409, 'LISTING_NOT_SUBMITTABLE', 'Only a draft listing can be submitted.');
+      response.json({ data: { listing } });
+    }),
+  );
+
+  router.post(
+    '/listings/:listingId/archive',
+    asyncRoute(async (request, response) => {
+      const listingId = z.uuid().parse(request.params.listingId);
+      const [business] = await db
+        .select({ id: businesses.id })
+        .from(businesses)
+        .where(eq(businesses.ownerId, request.auth!.id))
+        .limit(1);
+      if (!business) throw new HttpError(404, 'NOT_FOUND', 'The listing was not found.');
+      const [listing] = await db
+        .update(listings)
+        .set({ status: 'archived', updatedAt: new Date() })
+        .where(and(eq(listings.id, listingId), eq(listings.businessId, business.id)))
+        .returning({ id: listings.id, status: listings.status });
+      if (!listing) throw new HttpError(404, 'NOT_FOUND', 'The listing was not found.');
       response.json({ data: { listing } });
     }),
   );

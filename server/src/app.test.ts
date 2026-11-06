@@ -16,6 +16,7 @@ const environment: Environment = {
   UPLOAD_STORAGE_DRIVER: 'disabled',
   LOCAL_PRIVATE_UPLOAD_DIR: './var/private-uploads',
   LOCAL_PUBLIC_IMAGE_DIR: './var/public-listing-images',
+  MAIL_FROM_NAME: 'AgriMarket',
 };
 
 test('health endpoints do not reveal dependencies or secrets', async () => {

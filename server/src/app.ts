@@ -10,6 +10,7 @@ import { loadEnvironment } from './config.js';
 import { createDatabase } from './db/client.js';
 import { categories, produceTypes } from './db/schema.js';
 import { errorHandler, HttpError } from './http.js';
+import { createMailer, type Mailer } from './mailer.js';
 import { isTrustedOrigin, requireTrustedOrigin } from './middleware/auth.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
@@ -26,7 +27,10 @@ export type Application = {
   close: () => Promise<void>;
 };
 
-export function createApplication(environment: Environment = loadEnvironment()): Application {
+export function createApplication(
+  environment: Environment = loadEnvironment(),
+  mailer: Mailer = createMailer(environment),
+): Application {
   const { db, pool } = createDatabase(environment.DATABASE_URL);
   const storage = createPrivateStorage(environment);
   const imageStorage = createPublicImageStorage(environment);
@@ -67,6 +71,21 @@ export function createApplication(environment: Environment = loadEnvironment()):
       });
     },
   });
+  const passwordResetLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (_request, response) => {
+      response.status(429).json({
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many password reset attempts. Please wait and try again.',
+          details: [],
+        },
+      });
+    },
+  });
   const enquiryLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     limit: 10,
@@ -99,7 +118,11 @@ export function createApplication(environment: Environment = loadEnvironment()):
   app.use('/api/v1/auth/register', authLimiter);
   app.use('/api/v1/auth/login', authLimiter);
   app.use('/api/v1/auth/refresh', authLimiter);
-  app.use('/api/v1/auth', createAuthRouter(db, environment.COOKIE_SECURE, environment.SESSION_SECRET));
+  app.use('/api/v1/auth/password-reset', passwordResetLimiter);
+  app.use('/api/v1/auth', createAuthRouter(db, environment.COOKIE_SECURE, environment.SESSION_SECRET, {
+    mailer,
+    resetUrl: environment.PASSWORD_RESET_URL ?? `${environment.CLIENT_ORIGIN}/reset-password`,
+  }));
   app.get('/api/v1/categories', async (_request, response, next) => {
     try {
       const result = await db

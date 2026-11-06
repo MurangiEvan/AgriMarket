@@ -11,6 +11,9 @@ const initialCategories = [
   { slug: 'livestock', name: 'Livestock' },
   { slug: 'poultry', name: 'Poultry' },
   { slug: 'small-stock', name: 'Small stock' },
+  { slug: 'grain', name: 'Grain' },
+  { slug: 'processed-foods', name: 'Processed foods' },
+  { slug: 'agricultural-services', name: 'Agricultural services' },
 ];
 
 const initialProduceTypes: Record<string, string[]> = {
@@ -20,6 +23,9 @@ const initialProduceTypes: Record<string, string[]> = {
   livestock: ['Beef cattle', 'Pigs'],
   poultry: ['Chicken', 'Duck', 'Eggs', 'Turkey'],
   'small-stock': ['Goats', 'Rabbits', 'Sheep'],
+  grain: ['Barley', 'Maize', 'Oats', 'Sorghum', 'Soybeans', 'Sunflower', 'Wheat'],
+  'processed-foods': ['Dairy products', 'Dried fruit', 'Honey', 'Jams and preserves', 'Juices', 'Maize meal', 'Sauces and chutneys'],
+  'agricultural-services': ['Equipment hire', 'Farm consulting', 'Harvesting', 'Irrigation', 'Ploughing and tillage', 'Spraying', 'Veterinary services'],
 };
 
 const { db, pool } = createDatabase(loadEnvironment().DATABASE_URL);

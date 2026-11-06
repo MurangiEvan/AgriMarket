@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
-import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type Context, type PropsWithChildren } from 'react';
 
 import {
   ApiError,
@@ -27,7 +27,12 @@ type SessionContextValue = {
   signOut: () => Promise<void>;
 };
 
-const SessionContext = createContext<SessionContextValue | null>(null);
+const sessionContextRegistry = globalThis as typeof globalThis & {
+  __AGRIMARKET_SESSION_CONTEXT__?: Context<SessionContextValue | null>;
+};
+
+const SessionContext = sessionContextRegistry.__AGRIMARKET_SESSION_CONTEXT__ ??=
+  createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -130,8 +135,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   async function signIn(email: string, password: string) {
     setError('');
-    const signedInUser = await signInUser(email, password);
     await AsyncStorage.removeItem(SESSION_BLOCKED_KEY);
+    const signedInUser = await signInUser(email, password);
     await AsyncStorage.setItem(SESSION_HINT_KEY, signedInUser.role);
     setUser(signedInUser);
     setStatus('signedIn');

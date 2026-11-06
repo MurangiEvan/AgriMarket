@@ -9,6 +9,12 @@ test('a fresh signed-out launch redirects to sign in and leaves public auth rout
   assert.equal(getAuthRedirect('signedOut', null, 'sign-in'), null);
   assert.equal(getAuthRedirect('signedOut', null, 'sign-up'), null);
   assert.equal(getAuthRedirect('loading', null, 'market'), null);
+  assert.equal(getAuthRedirect('signedOut', null, 'forgot-password'), null);
+});
+
+test('the emailed reset link opens whether or not the device is signed in', () => {
+  assert.equal(getAuthRedirect('signedOut', null, 'reset-password'), null);
+  assert.equal(getAuthRedirect('signedIn', 'seller', 'reset-password'), null);
 });
 
 test('authenticated users are sent to their role home and cannot open role-restricted homes', () => {

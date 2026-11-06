@@ -86,7 +86,14 @@ test('local development origins are accepted only in development', () => {
   const configuredOrigins = new Set(['http://localhost:8081']);
   assert.equal(isTrustedOrigin('http://localhost:4173', configuredOrigins, true), true);
   assert.equal(isTrustedOrigin('http://127.0.0.1:9011', configuredOrigins, true), true);
+  assert.equal(isTrustedOrigin('http://192.168.137.68:4173', configuredOrigins, true), true);
+  assert.equal(isTrustedOrigin('http://10.1.2.3:8081', configuredOrigins, true), true);
+  assert.equal(isTrustedOrigin('http://172.31.2.3:8081', configuredOrigins, true), true);
+  assert.equal(isTrustedOrigin('http://172.32.2.3:8081', configuredOrigins, true), false);
+  assert.equal(isTrustedOrigin('http://8.8.8.8:8081', configuredOrigins, true), false);
+  assert.equal(isTrustedOrigin('http://attacker.example:8081', configuredOrigins, true), false);
   assert.equal(isTrustedOrigin('http://localhost:4173', configuredOrigins), false);
+  assert.equal(isTrustedOrigin('http://192.168.137.68:4173', configuredOrigins), false);
   assert.equal(isTrustedOrigin('https://localhost:4173', configuredOrigins, true), false);
   assert.equal(isTrustedOrigin('https://evil.example', configuredOrigins, true), false);
   assert.equal(isTrustedOrigin('null', configuredOrigins, true), false);

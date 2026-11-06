@@ -5,6 +5,10 @@ import * as schema from './schema.js';
 
 export function createDatabase(connectionString: string) {
   const pool = new Pool({ connectionString, max: 10, idleTimeoutMillis: 30_000 });
+  // Neon closes idle connections; without a listener the pool's 'error' event crashes the process.
+  pool.on('error', (error) => {
+    console.error('Idle database connection error:', error.message);
+  });
   return { pool, db: drizzle(pool, { schema }) };
 }
 

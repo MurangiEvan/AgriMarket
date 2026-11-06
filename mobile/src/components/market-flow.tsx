@@ -26,9 +26,10 @@ import {
   type MarketFlowState,
 } from '@/lib/market-flow';
 import { DEFAULT_RADIUS_KM, RADIUS_OPTIONS_KM, radiusOptionLabel } from '@/constants/market';
+import { categoryColor, categoryIcon, produceIcon } from '@/constants/produce-icons';
 
 type DeviceLocation = { latitude: number; longitude: number };
-type DeviceLocationResult = { location: DeviceLocation | null; status: 'granted' | 'denied' | 'unsupported' | 'timeout' | 'unavailable' };
+type DeviceLocationResult = { location: DeviceLocation | null; status: 'granted' | 'prompt' | 'denied' | 'unsupported' | 'timeout' | 'unavailable' };
 type MarketOrigin = ResolvedMarketOrigin;
 
 const radiusStorageKey = 'agrimarket.market.radius';
@@ -65,6 +66,7 @@ export function MarketFlow() {
   const [locationCandidates, setLocationCandidates] = useState<LocationCandidate[]>([]);
   const [locationSearchLoading, setLocationSearchLoading] = useState(false);
   const [locationSearchError, setLocationSearchError] = useState('');
+  const [locationAttribution, setLocationAttribution] = useState('');
   const [savingLocation, setSavingLocation] = useState(false);
   const visibleProduce = useMemo(() => filterAndSortProduce(produce, flow.query), [produce, flow.query]);
 
@@ -197,7 +199,7 @@ export function MarketFlow() {
     setLocationLoading(true);
     setLocationError('');
     try {
-      const result = await getDeviceLocation();
+      const result = await getDeviceLocation(true);
       setGpsStatus(result.status);
       setGpsLocation(result.location);
       if (!result.location) {
@@ -205,8 +207,8 @@ export function MarketFlow() {
           setOrigin(resolveMarketOrigin(null, savedLocation, 'saved'));
         } else {
           setOrigin(null);
+          setLocationEditorOpen(true);
         }
-        setLocationError(locationStatusMessage(result.status));
         return;
       }
       setOrigin(resolveMarketOrigin(result.location, savedLocation, 'current'));
@@ -237,6 +239,7 @@ export function MarketFlow() {
     try {
       const result = await searchBuyerLocations(query);
       setLocationCandidates(result.locations);
+      setLocationAttribution(result.attribution ?? '');
       if (result.locations.length === 0) setLocationSearchError('No matching places found. Try a nearby town or suburb.');
     } catch (cause) {
       setLocationSearchError(cause instanceof ApiError ? cause.message : 'Location search could not be completed.');
@@ -292,7 +295,7 @@ export function MarketFlow() {
           <View style={styles.panel}>
             <Text accessibilityRole="header" style={styles.title}>Find produce near you</Text>
             <Text style={styles.description}>Choose how far you’re willing to source. Your live location is used only for this session.</Text>
-            <Text style={styles.permissionNotice}>We’ll ask to use your location to show produce near you. You can use a saved area instead.</Text>
+            <Text style={styles.permissionNotice}>Choose “Use my current location” to find nearby produce, or set a saved area instead.</Text>
             <LocationChip origin={origin} loading={locationLoading} onChange={() => setLocationEditorOpen((open) => !open)} />
             <LocationActions
               onUseCurrent={() => void refreshCurrentLocation()}
@@ -319,6 +322,7 @@ export function MarketFlow() {
                 onSearch={() => void searchLocation()}
                 onChoose={(candidate) => void chooseSavedLocation(candidate)}
                 onClose={() => setLocationEditorOpen(false)}
+                attribution={locationAttribution}
               />
             ) : null}
             <Text style={styles.fieldLabel}>Search radius</Text>
@@ -351,11 +355,17 @@ export function MarketFlow() {
             {!origin && !locationLoading ? <Text style={styles.locationRequired}>Set your location to see produce near you.</Text> : null}
             <Pressable
               accessibilityRole="button"
-              disabled={!origin || locationLoading}
-              onPress={() => setFlow((current) => continueMarketFlow(current))}
-              style={[styles.primaryButton, (!origin || locationLoading) && styles.buttonDisabled]}
+              disabled={locationLoading}
+              onPress={() => {
+                if (origin) {
+                  setFlow((current) => continueMarketFlow(current));
+                } else {
+                  setLocationEditorOpen(true);
+                }
+              }}
+              style={[styles.primaryButton, locationLoading && styles.buttonDisabled]}
             >
-              <Text style={styles.primaryButtonText}>{locationLoading ? 'Checking location…' : 'Go to Market'}</Text>
+              <Text style={styles.primaryButtonText}>{locationLoading ? 'Checking location…' : origin ? 'Go to Market' : 'Set location to continue'}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -381,7 +391,7 @@ export function MarketFlow() {
               <View style={styles.categoryGrid}>
                 {categories.map((category) => (
                   <Pressable key={category.id} accessibilityRole="button" onPress={() => chooseCategory(category)} style={styles.categoryTile}>
-                    <Text style={styles.categoryMark}>{category.name.slice(0, 1)}</Text>
+                    <Text accessible={false} style={[styles.categoryMark, { backgroundColor: categoryColor(category.slug) }]}>{categoryIcon(category.slug)}</Text>
                     <Text style={styles.categoryName}>{category.name}</Text>
                     <Text style={styles.categoryArrow}>›</Text>
                   </Pressable>
@@ -428,6 +438,7 @@ export function MarketFlow() {
                 onSearch={() => void searchLocation()}
                 onChoose={(candidate) => void chooseSavedLocation(candidate)}
                 onClose={() => setLocationEditorOpen(false)}
+                attribution={locationAttribution}
               />
             ) : null}
             <View style={styles.searchLabelRow}>
@@ -474,6 +485,7 @@ export function MarketFlow() {
               <View style={styles.produceList}>
                 {visibleProduce.map((item) => item.available ? (
                   <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${item.name}, ${item.listingCount} listings, nearest about ${item.nearestKmRounded} kilometres`} onPress={() => openListingResults(item)} style={styles.produceItem}>
+                    <Text accessible={false} style={[styles.produceIcon, { backgroundColor: categoryColor(flow.categorySlug) }]}>{produceIcon(item.name, flow.categorySlug)}</Text>
                     <View style={styles.produceCopy}>
                       <Text style={styles.produceName}>{item.name}</Text>
                       <Text style={styles.produceMeta}>{item.listingCount} {item.listingCount === 1 ? 'listing' : 'listings'} · nearest ~{item.nearestKmRounded} km</Text>
@@ -489,6 +501,7 @@ export function MarketFlow() {
                       disabled
                       style={styles.unavailableItem}
                     >
+                      <Text accessible={false} style={[styles.produceIcon, styles.produceIconMuted]}>{produceIcon(item.name, flow.categorySlug)}</Text>
                       <View style={styles.produceCopy}>
                         <Text style={styles.unavailableName}>{item.name}</Text>
                         <Text style={styles.unavailableText}>Not available in radius</Text>
@@ -565,7 +578,9 @@ function LocationEditor({
   onSearch,
   onChoose,
   onClose,
+  attribution,
 }: {
+  attribution: string;
   query: string;
   onQueryChange: (value: string) => void;
   candidates: LocationCandidate[];
@@ -611,7 +626,7 @@ function LocationEditor({
           <Text style={styles.linkText}>{saving ? 'Saving…' : 'Use this area'}</Text>
         </Pressable>
       ))}
-      <Text style={styles.attribution}>Location results © Google Maps</Text>
+      {attribution ? <Text style={styles.attribution}>{attribution}</Text> : null}
     </View>
   );
 }
@@ -629,7 +644,7 @@ function StateMessage({ loading, text, error, onRetry }: { loading?: boolean; te
   );
 }
 
-async function getDeviceLocation(): Promise<DeviceLocationResult> {
+async function getDeviceLocation(requestPermission = false): Promise<DeviceLocationResult> {
   try {
     if (
       Platform.OS === 'web' &&
@@ -638,7 +653,10 @@ async function getDeviceLocation(): Promise<DeviceLocationResult> {
       return { location: null, status: 'unsupported' };
     }
     let permission = await Location.getForegroundPermissionsAsync();
-    if (permission.status !== 'granted') permission = await Location.requestForegroundPermissionsAsync();
+    if (permission.status !== 'granted' && requestPermission) {
+      permission = await Location.requestForegroundPermissionsAsync();
+    }
+    if (permission.status === 'undetermined') return { location: null, status: 'prompt' };
     if (permission.status !== 'granted') return { location: null, status: 'denied' };
 
     let cached: Location.LocationObject | null = null;
@@ -682,7 +700,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 function locationStatusMessage(status: DeviceLocationResult['status']) {
-  if (status === 'denied') return 'Location access is denied. Re-enable it in browser or device settings, or use a saved location.';
+  if (status === 'prompt') return 'Tap “Use my current location” to allow access, or choose a saved location.';
+  if (status === 'denied') {
+    return Platform.OS === 'web'
+      ? 'Location is blocked for this site. Open the site settings beside the address bar, set Location to Allow, then reload. Or choose a saved location.'
+      : 'Location is blocked for AgriMarket. Enable location in your device settings, or choose a saved location.';
+  }
   if (status === 'unsupported') return 'This device or browser does not support geolocation. Use a saved location.';
   if (status === 'timeout') return 'Your location request timed out. Try again or use a saved location.';
   return 'Your current location is unavailable. Try again or use a saved location.';
@@ -717,7 +740,7 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 54, alignItems: 'center', justifyContent: 'center', marginTop: 4, borderRadius: 6, backgroundColor: '#235946' },
   primaryButtonText: { color: '#fffefa', fontSize: 15, fontWeight: '800' },
   buttonDisabled: { backgroundColor: '#75877c' },
-  locationRequired: { color: '#703e20', fontSize: 14, fontWeight: '800' },
+  locationRequired: { color: '#d92d20', fontSize: 14, fontWeight: '800' },
   error: { color: '#922f25', fontSize: 13, lineHeight: 19 },
   helper: { color: '#4b5c51', fontSize: 12, lineHeight: 18 },
   headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -727,7 +750,7 @@ const styles = StyleSheet.create({
   linkText: { color: '#235946', fontSize: 13, fontWeight: '800', textDecorationLine: 'underline' },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   categoryTile: { flexGrow: 1, flexBasis: 240, minHeight: 90, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#d2ded2', borderRadius: 8, backgroundColor: '#f7f9f4' },
-  categoryMark: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e4eadf', color: '#235946', fontSize: 19, fontWeight: '800', lineHeight: 40, textAlign: 'center' },
+  categoryMark: { width: 52, height: 52, borderRadius: 26, overflow: 'hidden', fontSize: 28, lineHeight: 52, textAlign: 'center' },
   categoryName: { flex: 1, color: '#183f32', fontSize: 16, fontWeight: '800' },
   categoryArrow: { color: '#235946', fontSize: 24 },
   stateBox: { minHeight: 118, alignItems: 'center', justifyContent: 'center', padding: 18, gap: 9, borderRadius: 6, backgroundColor: '#f2f5ef' },
@@ -746,13 +769,15 @@ const styles = StyleSheet.create({
   candidateLabel: { flex: 1, color: '#183f32', fontSize: 13, lineHeight: 18 },
   attribution: { color: '#52675a', fontSize: 10 },
   produceList: { gap: 8 },
-  produceItem: { minHeight: 74, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: '#d2ded2', borderRadius: 7, backgroundColor: '#f7f9f4' },
+  produceItem: { minHeight: 74, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderWidth: 1, borderColor: '#d2ded2', borderRadius: 7, backgroundColor: '#f7f9f4' },
   produceCopy: { flex: 1, gap: 4 },
   produceName: { color: '#183f32', fontSize: 15, fontWeight: '800' },
   produceMeta: { color: '#40554a', fontSize: 12 },
   produceArrow: { color: '#235946', fontSize: 24 },
   unavailableWrap: { minHeight: 88, paddingHorizontal: 14, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#d5d8d1', borderRadius: 7, backgroundColor: '#f1f2ee' },
-  unavailableItem: { flex: 1, minHeight: 58, flexDirection: 'row', alignItems: 'center', opacity: 0.7 },
+  unavailableItem: { flex: 1, minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: 0.7 },
+  produceIcon: { width: 46, height: 46, borderRadius: 23, overflow: 'hidden', fontSize: 24, lineHeight: 46, textAlign: 'center' },
+  produceIconMuted: { backgroundColor: '#eef0ea' },
   unavailableName: { color: '#4e5750', fontSize: 15, fontWeight: '800' },
   unavailableText: { color: '#4e5750', fontSize: 12 },
   unavailableChange: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },

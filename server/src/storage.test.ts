@@ -20,6 +20,7 @@ function testEnvironment(directory: string, nodeEnvironment: Environment['NODE_E
     UPLOAD_STORAGE_DRIVER: 'local',
     LOCAL_PRIVATE_UPLOAD_DIR: directory,
     LOCAL_PUBLIC_IMAGE_DIR: path.join(directory, 'public-images'),
+    MAIL_FROM_NAME: 'AgriMarket',
   };
 }
 
@@ -45,6 +46,24 @@ test('private storage rejects a spoofed document type and local production stora
   const storage = createPrivateStorage(testEnvironment(directory));
   await assert.rejects(storage.storeVerificationDocument({ buffer: Buffer.from('not a PDF'), size: 9 }));
   assert.throws(() => createPrivateStorage(testEnvironment(directory, 'production')));
+  await rm(directory, { recursive: true, force: true });
+});
+
+test('Cloudinary storage validates document bytes before upload', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'agrimarket-cloudinary-'));
+  const environment: Environment = {
+    ...testEnvironment(directory),
+    UPLOAD_STORAGE_DRIVER: 'cloudinary',
+    CLOUDINARY_CLOUD_NAME: 'agrimarket-test',
+    CLOUDINARY_API_KEY: 'test-api-key',
+    CLOUDINARY_API_SECRET: 'test-api-secret',
+  };
+  const storage = createPrivateStorage(environment);
+  await assert.rejects(
+    storage.storeVerificationDocument({ buffer: Buffer.from('not a PDF'), size: 9 }),
+    { code: 'UNSUPPORTED_FILE_TYPE' },
+  );
+  await assert.rejects(storage.readPrivateObject('../not-a-document.pdf'), { code: 'DOCUMENT_NOT_FOUND' });
   await rm(directory, { recursive: true, force: true });
 });
 
