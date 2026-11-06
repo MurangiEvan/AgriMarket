@@ -5,4 +5,5 @@ coverage/
 .env.*
 !.env.example
 var/private-uploads/
+var/public-listing-images/
 drizzle/meta/_journal.json.tmp
