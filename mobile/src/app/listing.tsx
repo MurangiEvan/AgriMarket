@@ -138,7 +138,7 @@ function ContactAction({ label, url }: { label: string; url: string }) {
 }
 
 const styles = StyleSheet.create({
-  page: { paddingHorizontal: 20, paddingVertical: 26, paddingBottom: 50, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 26, paddingBottom: 120, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 1120, alignSelf: 'center' },
   backLink: { marginBottom: 15, color: '#235946', fontSize: 13, fontWeight: '700', textDecorationLine: 'none' },
   art: { height: 245, padding: 22, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', borderRadius: 8, backgroundColor: '#e8c977' },

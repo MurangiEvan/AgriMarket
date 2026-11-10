@@ -719,7 +719,7 @@ function locationStatusMessage(status: DeviceLocationResult['status']) {
 }
 
 const styles = StyleSheet.create({
-  page: { minHeight: '100%', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, minHeight: '100%', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 900, alignSelf: 'center', gap: 14 },
   frameCompact: { maxWidth: 620 },
   panel: { padding: 24, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 20, backgroundColor: '#ffffff', gap: 14, boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },

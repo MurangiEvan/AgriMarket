@@ -99,7 +99,7 @@ export default function EnquiriesScreen() {
 function formatStatus(status: string) { return status.replace(/^./, (value) => value.toUpperCase()); }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 52, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 820, alignSelf: 'center', gap: 14 },
   panel: { padding: 20, gap: 10, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 18, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },

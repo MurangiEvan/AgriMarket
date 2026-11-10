@@ -41,17 +41,17 @@ export default function AppNavigation({ children }: PropsWithChildren) {
 
   return (
     <AppThemeContext.Provider value={{ isDark, toggleTheme }}>
-      <View style={StyleSheet.flatten([styles.shell, isDark && styles.shellDark])}>
+      <View style={styles.shell}>
         {offline ? <View accessibilityRole="alert" style={styles.offlineBanner}><Text style={styles.offlineText}>Offline — showing the last signed-in app shell. Changes are unavailable.</Text></View> : null}
         {sessionError ? <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorText}>{sessionError}</Text></View> : null}
-        {showBack ? <View style={styles.backBar}><BackButton fallback={home} variant="floating" dark={isDark} /></View> : null}
+        {showBack ? <View style={styles.backBar}><BackButton fallback={home} variant="floating" /></View> : null}
         <View style={styles.content}>{children}</View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={actionsOpen ? 'Close app bar' : 'Open app bar'}
           accessibilityState={{ expanded: actionsOpen }}
           onPress={() => setActionsOpen((open) => !open)}
-          style={StyleSheet.flatten([styles.menuButton, isDark && styles.actionButtonDark])}
+          style={styles.menuButton}
         >
           <Text style={styles.actionMark}>{actionsOpen ? '×' : '☰'}</Text>
         </Pressable>
@@ -122,8 +122,8 @@ export default function AppNavigation({ children }: PropsWithChildren) {
 
 const styles = StyleSheet.create({
   shell: { flex: 1, minHeight: '100%', backgroundColor: '#f3f5ed' },
-  shellDark: { backgroundColor: '#121613' },
-  content: { flex: 1, paddingBottom: 92 },
+  // Pages scroll behind the floating menu; each page pads its own bottom so nothing is hidden.
+  content: { flex: 1 },
   backBar: { paddingTop: 14, paddingLeft: 12, paddingRight: 68, paddingBottom: 2, alignItems: 'flex-start' },
   offlineBanner: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#f4e3b2' },
   offlineText: { color: '#3e3217', fontSize: 13, fontWeight: '700', textAlign: 'center' },

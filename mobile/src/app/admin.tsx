@@ -141,7 +141,7 @@ export default function AdminScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 55, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 920, alignSelf: 'center', gap: 14 },
   denied: { flex: 1, minHeight: 320, padding: 24, justifyContent: 'center', gap: 12, backgroundColor: '#f3f5ed' },
   title: { color: '#183f32', fontFamily: 'Georgia', fontSize: 32 },

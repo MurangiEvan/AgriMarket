@@ -418,7 +418,7 @@ function photoStatus(status: string): { label: string; color: string } {
 }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 50, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 820, alignSelf: 'center', gap: 14 },
   section: { marginTop: 18, padding: 22, gap: 12, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 20, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
   heroButton: { minHeight: 42, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 999, backgroundColor: 'rgba(255, 255, 255, 0.95)' },

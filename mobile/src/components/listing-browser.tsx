@@ -259,7 +259,7 @@ function categoryMark(slug: string) {
 }
 
 const styles = StyleSheet.create({
-  page: { minHeight: '100%', paddingHorizontal: 20, paddingBottom: 42, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, minHeight: '100%', paddingHorizontal: 20, paddingBottom: 120, backgroundColor: '#f3f5ed' },
   pageDark: { backgroundColor: '#121613' },
   frame: { width: '100%', maxWidth: 1120, alignSelf: 'center' },
   frameDark: { opacity: 1 },
