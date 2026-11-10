@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import type { Database } from '../db/client.js';
-import { auditLogs, businesses, listings, users, verificationSubmissions } from '../db/schema.js';
+import { auditLogs, businesses, listingImages, listings, users, verificationSubmissions } from '../db/schema.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import type { PrivateStorage } from '../storage.js';
@@ -135,18 +135,26 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
         .select({
           id: listings.id,
           title: listings.title,
+          description: listings.description,
+          town: listings.town,
           status: listings.status,
           createdAt: listings.createdAt,
           businessId: businesses.id,
           businessName: businesses.name,
           verificationStatus: businesses.verificationStatus,
+          imageId: sql<string | null>`(select ${listingImages.id} from ${listingImages} where ${listingImages.listingId} = ${listings.id} order by ${listingImages.sortOrder} limit 1)`,
         })
         .from(listings)
         .innerJoin(businesses, eq(listings.businessId, businesses.id))
         .where(eq(listings.status, 'pending'))
         .orderBy(desc(listings.updatedAt))
         .limit(query.limit);
-      response.json({ data: rows });
+      response.json({
+        data: rows.map(({ imageId, ...row }) => ({
+          ...row,
+          imageUrl: imageId ? `/api/v1/media/listings/${imageId}` : null,
+        })),
+      });
     }),
   );
 

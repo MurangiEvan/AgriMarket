@@ -341,7 +341,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
         <View style={styles.photoGrid}>
           {visibleListings.map((listing) => {
             const slug = categories.find((item) => item.id === listing.categoryId)?.slug ?? '';
-            const photo = listing.status === 'published' ? listing.images?.[0] : undefined;
+            const photo = listing.images?.[0];
             const status = photoStatus(listing.status);
             return (
               <View key={listing.id} style={styles.photoCard}>

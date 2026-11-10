@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { ApiError, apiRequest } from '@/lib/api';
+import { Image } from 'expo-image';
+
+import { ApiError, apiRequest, apiResourceUrl } from '@/lib/api';
 import { useSession } from '@/components/session-provider';
 
 type VerificationItem = {
@@ -14,7 +16,7 @@ type VerificationItem = {
   ownerEmail: string;
   documentCount: number;
 };
-type ListingItem = { id: string; title: string; businessName: string; verificationStatus: string; status: string };
+type ListingItem = { id: string; title: string; description?: string; town?: string | null; imageUrl?: string | null; businessName: string; verificationStatus: string; status: string };
 type AuditItem = { id: string; action: string; targetType: string; targetId: string; actorId: string | null; createdAt: string };
 
 export default function AdminScreen() {
@@ -83,7 +85,7 @@ export default function AdminScreen() {
 
   function openDocument(verificationId: string, index: number) {
     if (Platform.OS === 'web') {
-      window.open(`${process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1'}/admin/verifications/${verificationId}/documents/${index}`, '_blank', 'noopener,noreferrer');
+      window.open(apiResourceUrl(`/api/v1/admin/verifications/${verificationId}/documents/${index}`), '_blank', 'noopener,noreferrer');
     } else {
       setNotice('Open this review queue in the AgriMarket web app to view private documents.');
     }
@@ -112,10 +114,20 @@ export default function AdminScreen() {
           </View>
         </View>)}
         <Text accessibilityRole="header" style={styles.sectionTitle}>Listing moderation</Text>
-        {listings.map((item) => <View key={item.id} style={styles.listingRow}><View style={styles.itemCopy}><Text style={styles.panelTitle}>{item.title}</Text><Text style={styles.body}>{item.businessName} · business {item.verificationStatus}</Text></View><View style={styles.actions}>
-          {item.verificationStatus === 'approved' && <Pressable accessibilityRole="button" disabled={busyId === item.id} onPress={() => moderateListing(item.id, 'published')} style={styles.docButton}><Text style={styles.docText}>Publish</Text></Pressable>}
-          <Pressable accessibilityRole="button" disabled={busyId === item.id} onPress={() => moderateListing(item.id, 'rejected')} style={styles.reject}><Text style={styles.rejectText}>Reject</Text></Pressable>
-        </View></View>)}
+        {listings.length === 0 ? <View style={styles.empty}><Text style={styles.panelTitle}>No photos waiting</Text><Text style={styles.body}>Produce photos sent by sellers will appear here for approval.</Text></View> : null}
+        {listings.map((item) => <View key={item.id} style={styles.listingRow}>
+          {item.imageUrl ? <Image accessibilityLabel={`Photo for ${item.title}`} source={{ uri: apiResourceUrl(item.imageUrl) }} contentFit="cover" style={styles.listingPhoto} /> : <View style={[styles.listingPhoto, styles.listingPhotoMissing]}><Text style={styles.date}>No photo</Text></View>}
+          <View style={styles.itemCopy}>
+            <Text style={styles.panelTitle}>{item.title}</Text>
+            <Text style={styles.body}>{item.businessName}{item.town ? ` · ${item.town}` : ''}</Text>
+            {item.description ? <Text style={styles.body} numberOfLines={3}>{item.description}</Text> : null}
+            {item.verificationStatus !== 'approved' ? <Text style={styles.date}>Approve this business in the review queue above before publishing its photos.</Text> : null}
+          </View>
+          <View style={styles.actions}>
+            {item.verificationStatus === 'approved' && <Pressable accessibilityRole="button" disabled={busyId === item.id} onPress={() => moderateListing(item.id, 'published')} style={styles.docButton}><Text style={styles.docText}>Approve &amp; publish</Text></Pressable>}
+            <Pressable accessibilityRole="button" disabled={busyId === item.id} onPress={() => moderateListing(item.id, 'rejected')} style={styles.reject}><Text style={styles.rejectText}>Reject</Text></Pressable>
+          </View>
+        </View>)}
         <Text accessibilityRole="header" style={styles.sectionTitle}>Recent audit events</Text>
         {audit.map((item) => <View key={item.id} style={styles.auditRow}><Text style={styles.auditAction}>{item.action}</Text><Text style={styles.date}>{item.actorId ? `Actor ${item.actorId.slice(0, 8)}` : 'System'} · {new Date(item.createdAt).toLocaleString()}</Text></View>)}
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
@@ -150,7 +162,9 @@ const styles = StyleSheet.create({
   approveText: { color: '#fffefa', fontSize: 11, fontWeight: '800' },
   reject: { minHeight: 39, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 4, backgroundColor: '#f3e3da' },
   rejectText: { color: '#963f31', fontSize: 11, fontWeight: '800' },
-  listingRow: { minHeight: 65, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: 1, borderBottomColor: '#d8ded4' },
+  listingRow: { minHeight: 65, paddingVertical: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderBottomColor: '#d8ded4' },
+  listingPhoto: { width: 96, height: 96, borderRadius: 8, backgroundColor: '#e4eadf' },
+  listingPhotoMissing: { alignItems: 'center', justifyContent: 'center' },
   auditRow: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#d8ded4' },
   auditAction: { color: '#183f32', fontSize: 12, fontWeight: '700' },
   error: { color: '#a23b32', fontSize: 12 },

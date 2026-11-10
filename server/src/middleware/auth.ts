@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from 'node:crypto';
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import { and, eq, gt } from 'drizzle-orm';
 
 import type { Database } from '../db/client.js';
@@ -21,45 +21,54 @@ export function createSessionToken(): string {
 export function requireAuth(db: Database, sessionSecret: string): RequestHandler {
   return async (request, _response, next) => {
     try {
-      const authorization = request.get('authorization');
-      const bearerToken = authorization?.match(/^Bearer ([A-Za-z0-9._-]+)$/)?.[1];
-      const token = bearerToken ?? request.cookies?.[ACCESS_COOKIE];
-      if (typeof token !== 'string') throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in to continue.');
-
-      const claims = verifyAccessToken(token, sessionSecret);
-      if (!claims) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in to continue.');
-
-      const [session] = await db
-        .select({
-          id: sessions.id,
-          userId: users.id,
-          role: users.role,
-          email: users.email,
-          isActive: users.isActive,
-        })
-        .from(sessions)
-        .innerJoin(users, eq(sessions.userId, users.id))
-        .where(and(
-          eq(sessions.id, claims.sessionId),
-          eq(users.id, claims.userId),
-          gt(sessions.expiresAt, new Date()),
-        ))
-        .limit(1);
-
-      if (!session || !session.isActive) {
-        throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in to continue.');
-      }
-
-      request.auth = {
-        id: session.userId,
-        role: session.role,
-        email: session.email,
-        sessionId: session.id,
-      };
+      const auth = await authenticateRequest(db, sessionSecret, request);
+      if (!auth) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in to continue.');
+      request.auth = auth;
       next();
     } catch (error) {
       next(error);
     }
+  };
+}
+
+// Resolves the signed-in user for a request, or null when there is no valid session.
+export async function authenticateRequest(
+  db: Database,
+  sessionSecret: string,
+  request: Request,
+): Promise<NonNullable<Request['auth']> | null> {
+  const authorization = request.get('authorization');
+  const bearerToken = authorization?.match(/^Bearer ([A-Za-z0-9._-]+)$/)?.[1];
+  const token = bearerToken ?? request.cookies?.[ACCESS_COOKIE];
+  if (typeof token !== 'string') return null;
+
+  const claims = verifyAccessToken(token, sessionSecret);
+  if (!claims) return null;
+
+  const [session] = await db
+    .select({
+      id: sessions.id,
+      userId: users.id,
+      role: users.role,
+      email: users.email,
+      isActive: users.isActive,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(and(
+      eq(sessions.id, claims.sessionId),
+      eq(users.id, claims.userId),
+      gt(sessions.expiresAt, new Date()),
+    ))
+    .limit(1);
+
+  if (!session || !session.isActive) return null;
+
+  return {
+    id: session.userId,
+    role: session.role,
+    email: session.email,
+    sessionId: session.id,
   };
 }
 
