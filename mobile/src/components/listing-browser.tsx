@@ -1,3 +1,4 @@
+import { Image as ExpoImage } from 'expo-image';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -109,6 +110,8 @@ export function ListingBrowser({ explore = false }: { explore?: boolean }) {
         </View>
 
         <View style={StyleSheet.flatten([styles.hero, compact && styles.heroCompact, isDark && styles.heroDark])}>
+          <ExpoImage source={require('@/assets/images/login/market-background.jpg')} contentFit="cover" style={StyleSheet.absoluteFill} accessible={false} />
+          <View style={styles.heroShade} />
           <View style={StyleSheet.flatten([styles.heroCopy, compact && styles.heroCopyCompact])}>
             <Text style={styles.heroKicker}>BUY LOCAL, BUY WITH CONFIDENCE</Text>
             <Text accessibilityRole="header" style={StyleSheet.flatten([styles.heroTitle, compact && styles.heroTitleCompact])}>{heading}</Text>
@@ -125,8 +128,8 @@ export function ListingBrowser({ explore = false }: { explore?: boolean }) {
           <View style={styles.searchRow}>
             <TextInput
               accessibilityLabel="Search products, services, or suppliers"
-              placeholder="Ask a question or search the directory"
-              placeholderTextColor={isDark ? '#9aa8a0' : '#78867d'}
+              placeholder="e.g. tomatoes, eggs or tractor hire"
+              placeholderTextColor="#7a877f"
               returnKeyType="search"
               value={searchDraft}
               onChangeText={setSearchDraft}
@@ -264,7 +267,8 @@ const styles = StyleSheet.create({
   toplineDark: { backgroundColor: 'transparent' },
   eyebrow: { color: '#52675a', fontSize: 11, fontWeight: '800' },
   textDark: { color: '#f3f5ed' },
-  hero: { minHeight: 215, paddingHorizontal: 26, paddingVertical: 30, borderRadius: 8, backgroundColor: '#183f32', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden' },
+  hero: { minHeight: 215, paddingHorizontal: 26, paddingVertical: 30, borderRadius: 22, backgroundColor: '#183f32', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden', boxShadow: '0 12px 32px rgba(24, 63, 50, 0.22)' },
+  heroShade: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(14, 40, 28, 0.62)' },
   heroDark: { backgroundColor: '#1a2c28' },
   heroCompact: { minHeight: 220, paddingHorizontal: 19, paddingVertical: 25 },
   heroCopy: { maxWidth: 680, gap: 9, flexShrink: 1 },

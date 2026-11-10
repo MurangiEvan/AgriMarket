@@ -27,6 +27,7 @@ import {
 } from '@/lib/market-flow';
 import { DEFAULT_RADIUS_KM, RADIUS_OPTIONS_KM, radiusOptionLabel } from '@/constants/market';
 import { categoryColor, categoryIcon, produceIcon } from '@/constants/produce-icons';
+import { greeting, HeroPill, PageHero } from '@/components/page-hero';
 
 type DeviceLocation = { latitude: number; longitude: number };
 type DeviceLocationResult = { location: DeviceLocation | null; status: 'granted' | 'prompt' | 'denied' | 'unsupported' | 'timeout' | 'unavailable' };
@@ -290,7 +291,13 @@ export function MarketFlow() {
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={[styles.frame, compact && styles.frameCompact]}>
-        <Text style={styles.eyebrow}>AGRIMARKET · NEARBY MARKET</Text>
+        <PageHero
+          eyebrow="NEARBY MARKET"
+          title={greeting()}
+          subtitle={origin?.source === 'saved' && origin.label ? `Fresh produce from verified farmers around ${origin.label.split(',')[0]}.` : 'Fresh produce from verified local farmers, close to you.'}
+        >
+          <HeroPill label="radius" value={radiusOptionLabel(flow.radiusKm)} />
+        </PageHero>
         {flow.screen === 'radius' ? (
           <View style={styles.panel}>
             <Text accessibilityRole="header" style={styles.title}>Find produce near you</Text>
@@ -453,7 +460,7 @@ export function MarketFlow() {
               <TextInput
                 accessibilityLabel="Search produce by name"
                 placeholder="e.g. Tomatoes"
-                placeholderTextColor="#65736a"
+                placeholderTextColor="#7a877f"
                 returnKeyType="search"
                 value={flow.searchText}
                 onChangeText={(searchText) => setFlow((current) => ({ ...current, searchText }))}
@@ -601,8 +608,8 @@ function LocationEditor({
       <View style={styles.searchRow}>
         <TextInput
           accessibilityLabel="Town or suburb"
-          placeholder="Town or suburb"
-          placeholderTextColor="#65736a"
+          placeholder="e.g. Tzaneen or Sandton"
+          placeholderTextColor="#7a877f"
           returnKeyType="search"
           value={query}
           onChangeText={onQueryChange}
@@ -712,11 +719,10 @@ function locationStatusMessage(status: DeviceLocationResult['status']) {
 }
 
 const styles = StyleSheet.create({
-  page: { minHeight: '100%', paddingHorizontal: 18, paddingTop: 26, paddingBottom: 40, backgroundColor: '#f3f5ed' },
+  page: { minHeight: '100%', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 900, alignSelf: 'center', gap: 14 },
   frameCompact: { maxWidth: 620 },
-  eyebrow: { color: '#52675a', fontSize: 11, fontWeight: '800', letterSpacing: 0.7 },
-  panel: { padding: 22, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 10, backgroundColor: '#fffefa', gap: 14 },
+  panel: { padding: 24, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 20, backgroundColor: '#ffffff', gap: 14, boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
   title: { color: '#183f32', fontFamily: 'Georgia', fontSize: 30, lineHeight: 36 },
   description: { color: '#40554a', fontSize: 15, lineHeight: 23 },
   permissionNotice: { padding: 12, borderRadius: 6, backgroundColor: '#eaf0e7', color: '#294c3c', fontSize: 13, lineHeight: 19 },
@@ -749,7 +755,7 @@ const styles = StyleSheet.create({
   textButton: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 4 },
   linkText: { color: '#235946', fontSize: 13, fontWeight: '800', textDecorationLine: 'underline' },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  categoryTile: { flexGrow: 1, flexBasis: 240, minHeight: 90, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#d2ded2', borderRadius: 8, backgroundColor: '#f7f9f4' },
+  categoryTile: { flexGrow: 1, flexBasis: 240, minHeight: 90, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 18, backgroundColor: '#ffffff', boxShadow: '0 4px 14px rgba(24, 63, 50, 0.07)' },
   categoryMark: { width: 52, height: 52, borderRadius: 26, overflow: 'hidden', fontSize: 28, lineHeight: 52, textAlign: 'center' },
   categoryName: { flex: 1, color: '#183f32', fontSize: 16, fontWeight: '800' },
   categoryArrow: { color: '#235946', fontSize: 24 },
@@ -769,7 +775,7 @@ const styles = StyleSheet.create({
   candidateLabel: { flex: 1, color: '#183f32', fontSize: 13, lineHeight: 18 },
   attribution: { color: '#52675a', fontSize: 10 },
   produceList: { gap: 8 },
-  produceItem: { minHeight: 74, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderWidth: 1, borderColor: '#d2ded2', borderRadius: 7, backgroundColor: '#f7f9f4' },
+  produceItem: { minHeight: 74, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 16, backgroundColor: '#ffffff', boxShadow: '0 4px 14px rgba(24, 63, 50, 0.07)' },
   produceCopy: { flex: 1, gap: 4 },
   produceName: { color: '#183f32', fontSize: 15, fontWeight: '800' },
   produceMeta: { color: '#40554a', fontSize: 12 },

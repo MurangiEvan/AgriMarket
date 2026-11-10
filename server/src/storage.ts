@@ -75,6 +75,8 @@ async function uploadCloudinaryObject(
       overwrite: false,
       unique_filename: false,
       use_filename: false,
+      // Fail with a clear 503 instead of hanging when the connection to Cloudinary stalls.
+      timeout: 90_000,
     });
   } catch (error) {
     reportCloudinaryFailure('upload', error);

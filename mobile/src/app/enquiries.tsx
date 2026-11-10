@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError, apiRequest } from '@/lib/api';
+import { HeroPill, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
 
 type EnquiryItem = {
@@ -65,8 +66,13 @@ export default function EnquiriesScreen() {
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <View style={styles.frame}>
-        <Text style={styles.eyebrow}>{user?.role === 'seller' ? 'SELLER WORKSPACE' : 'BUYER ACCOUNT'}</Text>
-        <Text accessibilityRole="header" style={styles.title}>{user?.role === 'seller' ? 'Supplier inbox' : 'Your enquiries'}</Text>
+        <PageHero
+          eyebrow={user?.role === 'seller' ? 'SELLER WORKSPACE' : 'BUYER ACCOUNT'}
+          title={user?.role === 'seller' ? 'Supplier inbox' : 'Your enquiries'}
+          subtitle={user?.role === 'seller' ? 'Messages from buyers interested in your produce.' : 'Every conversation you have started with a supplier.'}
+        >
+          {user && (user.role === 'buyer' || user.role === 'seller') ? <HeroPill label={enquiries.length === 1 ? 'message' : 'messages'} value={enquiries.length} /> : null}
+        </PageHero>
         {!user ? <View style={styles.panel}><Text style={styles.body}>Sign in to see enquiries linked to your account.</Text><Link href="/account" style={styles.link}>Sign in or register</Link></View> : null}
         {user && user.role === 'admin' ? <View style={styles.panel}><Text style={styles.body}>Administrator access is for review tasks. Enquiry access is limited to operational needs.</Text><Link href="/admin" style={styles.link}>Open administrator review</Link></View> : null}
         {user && (user.role === 'buyer' || user.role === 'seller') && loading ? <Text style={styles.body}>Loading enquiries…</Text> : null}
@@ -93,11 +99,9 @@ export default function EnquiriesScreen() {
 function formatStatus(status: string) { return status.replace(/^./, (value) => value.toUpperCase()); }
 
 const styles = StyleSheet.create({
-  page: { paddingHorizontal: 20, paddingVertical: 28, paddingBottom: 52, backgroundColor: '#f3f5ed' },
-  frame: { width: '100%', maxWidth: 820, alignSelf: 'center', gap: 13 },
-  eyebrow: { color: '#a05d3c', fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
-  title: { marginBottom: 8, color: '#183f32', fontFamily: 'Georgia', fontSize: 32 },
-  panel: { padding: 16, gap: 9, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 8, backgroundColor: '#fffefa' },
+  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 52, backgroundColor: '#f3f5ed' },
+  frame: { width: '100%', maxWidth: 820, alignSelf: 'center', gap: 14 },
+  panel: { padding: 20, gap: 10, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 18, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   panelTitle: { color: '#183f32', fontSize: 15, fontWeight: '800' },
   status: { paddingHorizontal: 9, paddingVertical: 5, color: '#235946', backgroundColor: '#e4eadf', borderRadius: 14, fontSize: 10, fontWeight: '800' },
@@ -106,7 +110,7 @@ const styles = StyleSheet.create({
   date: { color: '#78867d', fontSize: 10 },
   link: { color: '#235946', fontSize: 12, fontWeight: '800', textDecorationLine: 'underline' },
   actions: { marginTop: 6, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  smallAction: { minHeight: 35, paddingHorizontal: 10, justifyContent: 'center', borderRadius: 4, backgroundColor: '#e4eadf' },
+  smallAction: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 999, backgroundColor: '#e4eadf' },
   smallActionText: { color: '#235946', fontSize: 11, fontWeight: '800' },
   error: { color: '#a23b32', fontSize: 12 },
   success: { color: '#236449', fontSize: 12 },

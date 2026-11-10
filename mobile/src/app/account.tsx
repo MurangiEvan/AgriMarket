@@ -7,6 +7,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import { ApiError, apiRequest, apiResourceUrl, getCategories, getSellerProduceTypes, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
 import { categoryColor, categoryIcon, produceIcon } from '@/constants/produce-icons';
+import { greeting, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
 
 type BusinessProfile = {
@@ -35,6 +36,24 @@ function appendNativeUpload(form: FormData, field: string, file: NativeUploadFil
   nativeForm.append(field, file);
 }
 
+// Opens the browser file chooser. The input is attached to the page while open because some
+// browsers (notably Safari) never report the selection for a detached input.
+function pickWebFiles(accept: string, multiple: boolean, onPicked: (files: File[]) => void) {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = accept;
+  picker.multiple = multiple;
+  picker.style.display = 'none';
+  picker.addEventListener('change', () => {
+    const files = Array.from(picker.files ?? []);
+    picker.remove();
+    if (files.length) onPicked(files);
+  });
+  picker.addEventListener('cancel', () => picker.remove());
+  document.body.appendChild(picker);
+  picker.click();
+}
+
 function appendListingPhoto(form: FormData, photo: ListingPhotoDraft) {
   if (photo.file) {
     form.append('images', photo.file, photo.name);
@@ -53,14 +72,9 @@ export default function AccountScreen() {
 
   return (
     <AccountFrame>
-      <View style={styles.accountHeader}>
-        <View>
-          <Text style={styles.eyebrow}>{user.role.toUpperCase()} ACCOUNT</Text>
-          <Text accessibilityRole="header" style={styles.title}>Your account</Text>
-          <Text style={styles.muted}>{user.email}</Text>
-        </View>
-        <Pressable accessibilityRole="button" onPress={() => signOut().catch(() => setError('Sign out failed.'))} style={styles.secondaryButton}><Text style={styles.secondaryText}>Sign out</Text></Pressable>
-      </View>
+      <PageHero eyebrow={`${user.role.toUpperCase()} ACCOUNT`} title={greeting()} subtitle={`Signed in as ${user.email}`}>
+        <Pressable accessibilityRole="button" onPress={() => signOut().catch(() => setError('Sign out failed.'))} style={styles.heroButton}><Text style={styles.heroButtonText}>Sign out</Text></Pressable>
+      </PageHero>
       {user.role === 'seller' ? <SellerDashboard user={user} /> : null}
       {user.role === 'buyer' ? <BuyerDashboard /> : null}
       {user.role === 'admin' ? <Link href="/admin" style={styles.linkText}>Open administrator review</Link> : null}
@@ -100,6 +114,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const [listingPhotoDraft, setListingPhotoDraft] = useState<ListingPhotoDraft | null>(null);
   const [photoNote, setPhotoNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -157,8 +172,9 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     return () => { active = false; };
   }, [categoryId]);
 
-  async function runAction(action: () => Promise<void>, successMessage: string) {
-    setBusy(true);
+  // Each kind of work gets its own "in progress" flag so a slow photo upload never locks the document upload.
+  async function runAction(action: () => Promise<void>, successMessage: string, setInProgress: (value: boolean) => void = setBusy) {
+    setInProgress(true);
     setError('');
     setNotice('');
     try {
@@ -168,7 +184,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'The change could not be saved.');
     } finally {
-      setBusy(false);
+      setInProgress(false);
     }
   }
 
@@ -235,14 +251,9 @@ function SellerDashboard({ user }: { user: SessionUser }) {
 
   async function chooseNewListingPhoto() {
     if (Platform.OS === 'web') {
-      const picker = document.createElement('input');
-      picker.type = 'file';
-      picker.accept = 'image/jpeg,image/png,image/webp';
-      picker.onchange = () => {
-        const file = picker.files?.[0];
+      pickWebFiles('image/jpeg,image/png,image/webp', false, ([file]) => {
         if (file) setListingPhotoDraft({ uri: URL.createObjectURL(file), name: file.name, type: file.type || 'image/jpeg', file });
-      };
-      picker.click();
+      });
       return;
     }
 
@@ -264,13 +275,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
 
   async function chooseDocuments() {
     if (Platform.OS === 'web') {
-      const picker = document.createElement('input');
-      picker.type = 'file';
-      picker.accept = 'application/pdf,image/jpeg,image/png';
-      picker.multiple = true;
-      picker.onchange = () => {
-        const files = Array.from(picker.files ?? []);
-        if (!files.length) return;
+      pickWebFiles('application/pdf,image/jpeg,image/png', true, (files) => {
         if (files.length > 5) {
           setError('Choose no more than five verification documents.');
           return;
@@ -279,9 +284,8 @@ function SellerDashboard({ user }: { user: SessionUser }) {
           const form = new FormData();
           files.forEach((file) => form.append('documents', file));
           await apiRequest('/seller/verification', { method: 'POST', body: form });
-        }, 'Verification documents submitted for review.');
-      };
-      picker.click();
+        }, 'Verification documents submitted for review.', setUploadingDocuments);
+      });
       return;
     }
 
@@ -313,7 +317,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
           });
         });
         await apiRequest('/seller/verification', { method: 'POST', body: form });
-      }, 'Verification documents submitted for review.');
+      }, 'Verification documents submitted for review.', setUploadingDocuments);
     } catch {
       setError('The document picker could not be opened. Try again or choose another file.');
     }
@@ -323,15 +327,15 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     <View style={styles.section}>
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Business profile</Text><Text style={styles.statusTag}>{formatStatus(business?.verificationStatus ?? 'not_submitted')}</Text></View>
       <Text style={styles.muted}>Your business profile is visible publicly only after approval and publication.</Text>
-      <Text style={styles.fieldLabel}>Business name</Text><TextInput accessibilityLabel="Business name" value={name} onChangeText={setName} style={styles.input} />
-      <Text style={styles.fieldLabel}>Business description</Text><TextInput accessibilityLabel="Business description" multiline value={description} onChangeText={setDescription} style={[styles.input, styles.multiline]} />
+      <Text style={styles.fieldLabel}>Business name</Text><TextInput accessibilityLabel="Business name" placeholder="e.g. Tomatoes by Thabo" placeholderTextColor="#7a877f" value={name} onChangeText={setName} style={styles.input} />
+      <Text style={styles.fieldLabel}>Business description</Text><TextInput accessibilityLabel="Business description" placeholder="e.g. Family farm near Tzaneen growing tomatoes and peppers. We supply spaza shops and restaurants every week." placeholderTextColor="#7a877f" multiline value={description} onChangeText={setDescription} style={[styles.input, styles.multiline]} />
       <Text style={styles.fieldLabel}>Province</Text><ProvincePicker selected={province} onSelect={setProvince} />
-      <Text style={styles.fieldLabel}>Business address or farm location</Text><TextInput accessibilityLabel="Business address or farm location" value={address} onChangeText={setAddress} style={styles.input} />
-      <Text style={styles.fieldLabel}>Town or area</Text><TextInput accessibilityLabel="Town or area" value={town} onChangeText={setTown} style={styles.input} />
+      <Text style={styles.fieldLabel}>Business address or farm location</Text><TextInput accessibilityLabel="Business address or farm location" placeholder="e.g. Farm 12, R71 road, Tzaneen" placeholderTextColor="#7a877f" value={address} onChangeText={setAddress} style={styles.input} />
+      <Text style={styles.fieldLabel}>Town or area</Text><TextInput accessibilityLabel="Town or area" placeholder="e.g. Tzaneen" placeholderTextColor="#7a877f" value={town} onChangeText={setTown} style={styles.input} />
       <Text style={styles.helper}>Your address is used to locate listings and is not shown to buyers. If omitted, the town or area is used.</Text>
-      <Text style={styles.fieldLabel}>Contact email</Text><TextInput accessibilityLabel="Contact email" autoCapitalize="none" keyboardType="email-address" value={contactEmail} onChangeText={setContactEmail} style={styles.input} />
-      <Text style={styles.fieldLabel}>Mobile number</Text><TextInput accessibilityLabel="Mobile number" keyboardType="phone-pad" value={contactPhone} onChangeText={setContactPhone} style={styles.input} />
-      <Text style={styles.fieldLabel}>WhatsApp number</Text><TextInput accessibilityLabel="WhatsApp number" keyboardType="phone-pad" value={whatsappPhone} onChangeText={setWhatsappPhone} style={styles.input} />
+      <Text style={styles.fieldLabel}>Contact email</Text><TextInput accessibilityLabel="Contact email" placeholder="e.g. orders@yourfarm.co.za" placeholderTextColor="#7a877f" autoCapitalize="none" keyboardType="email-address" value={contactEmail} onChangeText={setContactEmail} style={styles.input} />
+      <Text style={styles.fieldLabel}>Mobile number</Text><TextInput accessibilityLabel="Mobile number" placeholder="e.g. 082 123 4567" placeholderTextColor="#7a877f" keyboardType="phone-pad" value={contactPhone} onChangeText={setContactPhone} style={styles.input} />
+      <Text style={styles.fieldLabel}>WhatsApp number</Text><TextInput accessibilityLabel="WhatsApp number" placeholder="e.g. 082 123 4567" placeholderTextColor="#7a877f" keyboardType="phone-pad" value={whatsappPhone} onChangeText={setWhatsappPhone} style={styles.input} />
       <Pressable accessibilityRole="button" disabled={busy || name.trim().length < 2} onPress={saveBusiness} style={[styles.primaryButton, busy && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Saving…' : 'Save business profile'}</Text></Pressable>
 
       <View style={styles.rule} />
@@ -379,7 +383,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       </View> : <Pressable accessibilityRole="button" disabled={busy} onPress={() => void chooseNewListingPhoto()} style={styles.secondaryButton}><Text style={styles.secondaryText}>Choose photo</Text></Pressable>}
       <Text style={styles.helper}>JPEG, PNG or WebP. A clear, well-lit photo helps buyers.</Text>
       <Text style={styles.fieldLabel}>Short note for buyers (optional)</Text>
-      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes, 10 kg boxes, harvested weekly" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
+      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes in 10 kg boxes, harvested every week" placeholderTextColor="#7a877f" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
       <Pressable accessibilityRole="button" disabled={busy || !business || !produceTypeId || !listingPhotoDraft} onPress={() => void addProducePhoto()} style={[styles.primaryButton, (busy || !business || !produceTypeId || !listingPhotoDraft) && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Uploading…' : 'Add photo'}</Text></Pressable>
       {!business ? <Text style={styles.helper}>Save your business profile above before adding produce photos.</Text> : null}
 
@@ -387,7 +391,8 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Verification</Text><Text style={styles.statusTag}>{formatStatus(verification?.verificationStatus ?? 'not_submitted')}</Text></View>
       <Text style={styles.muted}>Documents are private and can only be reviewed by an authorized administrator. Uploads use the storage configured on the AgriMarket server.</Text>
       {verification?.submissions.map((submission) => <View key={submission.id} style={styles.feedbackBox}><Text style={styles.listItemTitle}>{formatStatus(submission.status)} · {new Date(submission.submittedAt).toLocaleDateString()}</Text>{submission.sellerFeedback ? <Text style={styles.muted}>{submission.sellerFeedback}</Text> : null}</View>)}
-      {verification?.verificationStatus !== 'approved' && <Pressable accessibilityRole="button" disabled={busy || !business} onPress={chooseDocuments} style={[styles.secondaryButton, (!business || busy) && styles.disabled]}><Text style={styles.secondaryText}>Choose verification documents</Text></Pressable>}
+      {verification?.verificationStatus !== 'approved' && verification?.verificationStatus !== 'pending' && <Pressable accessibilityRole="button" disabled={uploadingDocuments || !business} onPress={chooseDocuments} style={[styles.secondaryButton, (!business || uploadingDocuments) && styles.disabled]}><Text style={styles.secondaryText}>{uploadingDocuments ? 'Uploading documents…' : 'Choose verification documents'}</Text></Pressable>}
+      {verification?.verificationStatus === 'pending' ? <Text style={styles.helper}>Your documents are with the admin for review. You can upload new ones if they ask for changes.</Text> : null}
       {!business ? <Text style={styles.helper}>Save your business profile above before uploading verification documents.</Text> : null}
       <Text style={styles.helper}>PDF, JPEG, or PNG · maximum 5 documents, 10 MB each</Text>
       <Link href="/enquiries" style={styles.linkText}>Open seller enquiry inbox</Link>
@@ -413,12 +418,11 @@ function photoStatus(status: string): { label: string; color: string } {
 }
 
 const styles = StyleSheet.create({
-  page: { paddingHorizontal: 20, paddingVertical: 28, paddingBottom: 50, backgroundColor: '#f3f5ed' },
+  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 50, backgroundColor: '#f3f5ed' },
   frame: { width: '100%', maxWidth: 820, alignSelf: 'center', gap: 14 },
-  accountHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  eyebrow: { color: '#a05d3c', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  title: { marginTop: 5, color: '#183f32', fontFamily: 'Georgia', fontSize: 32, lineHeight: 38 },
-  section: { marginTop: 20, padding: 18, gap: 10, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 8, backgroundColor: '#fffefa' },
+  section: { marginTop: 18, padding: 22, gap: 12, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 20, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
+  heroButton: { minHeight: 42, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 999, backgroundColor: 'rgba(255, 255, 255, 0.95)' },
+  heroButtonText: { color: '#183f32', fontSize: 14, fontWeight: '800' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   sectionTitle: { color: '#183f32', fontFamily: 'Georgia', fontSize: 23, lineHeight: 29 },
   statusTag: { paddingHorizontal: 10, paddingVertical: 6, color: '#235946', backgroundColor: '#e4eadf', borderRadius: 16, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },

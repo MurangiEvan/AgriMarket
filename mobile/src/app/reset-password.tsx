@@ -2,6 +2,7 @@ import { Link, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { BackButton } from '@/components/back-button';
 import { ApiError, confirmPasswordReset } from '@/lib/api';
 
 export default function ResetPasswordScreen() {
@@ -33,6 +34,7 @@ export default function ResetPasswordScreen() {
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
+        <BackButton fallback="/sign-in" />
         <Text style={styles.brand}>AGRIMARKET</Text>
         <Text accessibilityRole="header" style={styles.title}>Choose a new password</Text>
         {doneMessage ? (
@@ -51,6 +53,8 @@ export default function ResetPasswordScreen() {
             <Text style={styles.label}>New password</Text>
             <TextInput
               accessibilityLabel="New password"
+              placeholder="At least 10 characters"
+              placeholderTextColor="#7a877f"
               autoComplete="new-password"
               secureTextEntry
               value={password}
@@ -60,6 +64,8 @@ export default function ResetPasswordScreen() {
             <Text style={styles.label}>Confirm new password</Text>
             <TextInput
               accessibilityLabel="Confirm new password"
+              placeholder="Type the new password again"
+              placeholderTextColor="#7a877f"
               autoComplete="new-password"
               secureTextEntry
               returnKeyType="done"

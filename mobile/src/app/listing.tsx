@@ -107,7 +107,7 @@ export default function ListingDetailScreen() {
             <Text accessibilityRole="header" style={styles.sectionTitle}>Talk to this supplier</Text>
             {user?.role === 'buyer' ? <>
               <Text style={styles.muted}>Your message will be delivered to {business.name}.</Text>
-              <TextInput accessibilityLabel="Enquiry message" multiline maxLength={4000} placeholder="Introduce your business and what you need." placeholderTextColor="#78867d" value={message} onChangeText={setMessage} style={styles.messageInput} />
+              <TextInput accessibilityLabel="Enquiry message" placeholder="e.g. Hi, we run a restaurant in Polokwane and need 20 kg of tomatoes every week. Can you deliver?" placeholderTextColor="#7a877f" multiline maxLength={4000} value={message} onChangeText={setMessage} style={styles.messageInput} />
               <Text style={styles.counter}>{message.length}/4000</Text>
               <Pressable accessibilityRole="button" disabled={submitting || message.trim().length < 10} onPress={submitEnquiry} style={[styles.submitButton, (submitting || message.trim().length < 10) && styles.disabled]}><Text style={styles.submitText}>{submitting ? 'Sending…' : 'Send enquiry'}</Text></Pressable>
             </> : <>

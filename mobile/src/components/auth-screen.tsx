@@ -3,6 +3,8 @@ import { useRef, useState, type ElementRef } from 'react';
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ApiError } from '@/lib/api';
+import { BackButton } from '@/components/back-button';
+import { LoginBackground } from '@/components/login-background';
 import { useSession } from '@/components/session-provider';
 
 export function AuthScreen({ registration = false }: { registration?: boolean }) {
@@ -32,91 +34,101 @@ export function AuthScreen({ registration = false }: { registration?: boolean })
 
   const visibleError = error || sessionError;
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <View style={styles.card}>
-        <Text style={styles.brand}>AGRIMARKET</Text>
-        <Text accessibilityRole="header" style={styles.title}>
-          {registration ? 'Create your account' : 'Welcome to AgriMarket'}
-        </Text>
-        <Text style={styles.description}>
-          {registration ? 'Join as a buyer or seller to connect through local produce.' : 'Sign in to discover verified farmers and suppliers.'}
-        </Text>
-        {registration ? (
-          <View style={styles.roles}>
-            {(['buyer', 'seller'] as const).map((item) => (
-              <Pressable
-                key={item}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: role === item }}
-                onPress={() => setRole(item)}
-                style={[styles.roleButton, role === item && styles.roleSelected]}
-              >
-                <Text style={[styles.roleText, role === item && styles.roleTextSelected]}>
-                  {item === 'buyer' ? 'Buyer' : 'Seller'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-
-        <Text nativeID="auth-email-label" style={styles.label}>Email</Text>
-        <TextInput
-          accessibilityLabel="Email"
-          accessibilityLabelledBy={Platform.select({ android: 'auth-email-label', default: undefined })}
-          autoCapitalize="none"
-          autoComplete="email"
-          keyboardType="email-address"
-          returnKeyType="next"
-          value={email}
-          onChangeText={setEmail}
-          onFocus={() => setFocusedField('email')}
-          onBlur={() => setFocusedField(null)}
-          onSubmitEditing={() => passwordInput.current?.focus()}
-          style={[styles.input, focusedField === 'email' && styles.inputFocused]}
-        />
-        <Text nativeID="auth-password-label" style={styles.label}>Password</Text>
-        <TextInput
-          ref={passwordInput}
-          accessibilityLabel="Password"
-          accessibilityLabelledBy={Platform.select({ android: 'auth-password-label', default: undefined })}
-          autoComplete={registration ? 'new-password' : 'current-password'}
-          secureTextEntry
-          returnKeyType="done"
-          value={password}
-          onChangeText={setPassword}
-          onFocus={() => setFocusedField('password')}
-          onBlur={() => setFocusedField(null)}
-          onSubmitEditing={() => void submit()}
-          style={[styles.input, focusedField === 'password' && styles.inputFocused]}
-        />
-        {registration ? <Text style={styles.helper}>Use at least 10 characters. Email delivery is not configured, so confirmation messages are not sent.</Text> : null}
-        {visibleError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{visibleError}</Text> : null}
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy || !email.trim() || !password}
-          onPress={() => void submit()}
-          style={[styles.primary, (busy || !email.trim() || !password) && styles.disabled]}
-        >
-          <Text style={styles.primaryText}>{busy ? 'Please wait…' : registration ? 'Create account' : 'Sign in'}</Text>
-        </Pressable>
-        <View style={styles.links}>
+    <View style={styles.screen}>
+      <LoginBackground />
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        <View style={styles.card}>
+          {registration ? <BackButton fallback="/sign-in" /> : null}
+          <Text style={styles.brand}>AGRIMARKET</Text>
+          <Text accessibilityRole="header" style={styles.title}>
+            {registration ? 'Create your account' : 'Welcome to AgriMarket'}
+          </Text>
+          <Text style={styles.description}>
+            {registration ? 'Join as a buyer or seller to connect through local produce.' : 'Sign in to discover verified farmers and suppliers.'}
+          </Text>
           {registration ? (
-            <Link href="/sign-in" style={styles.link}>Already have an account? Sign in</Link>
-          ) : (
-            <>
-              <Link href="/sign-up" style={styles.link}>Create an account</Link>
-              <Link href="/forgot-password" style={styles.link}>Forgot password?</Link>
-            </>
-          )}
+            <View style={styles.roles}>
+              {(['buyer', 'seller'] as const).map((item) => (
+                <Pressable
+                  key={item}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: role === item }}
+                  onPress={() => setRole(item)}
+                  style={[styles.roleButton, role === item && styles.roleSelected]}
+                >
+                  <Text style={[styles.roleText, role === item && styles.roleTextSelected]}>
+                    {item === 'buyer' ? 'Buyer' : 'Seller'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          <Text nativeID="auth-email-label" style={styles.label}>Email</Text>
+          <TextInput
+            accessibilityLabel="Email"
+            placeholder="e.g. you@example.com"
+            placeholderTextColor="#7a877f"
+            accessibilityLabelledBy={Platform.select({ android: 'auth-email-label', default: undefined })}
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            returnKeyType="next"
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => setFocusedField('email')}
+            onBlur={() => setFocusedField(null)}
+            onSubmitEditing={() => passwordInput.current?.focus()}
+            style={[styles.input, focusedField === 'email' && styles.inputFocused]}
+          />
+          <Text nativeID="auth-password-label" style={styles.label}>Password</Text>
+          <TextInput
+            ref={passwordInput}
+            accessibilityLabel="Password"
+            placeholder={registration ? 'At least 10 characters' : 'Your password'}
+            placeholderTextColor="#7a877f"
+            accessibilityLabelledBy={Platform.select({ android: 'auth-password-label', default: undefined })}
+            autoComplete={registration ? 'new-password' : 'current-password'}
+            secureTextEntry
+            returnKeyType="done"
+            value={password}
+            onChangeText={setPassword}
+            onFocus={() => setFocusedField('password')}
+            onBlur={() => setFocusedField(null)}
+            onSubmitEditing={() => void submit()}
+            style={[styles.input, focusedField === 'password' && styles.inputFocused]}
+          />
+          {registration ? <Text style={styles.helper}>Use at least 10 characters. Email delivery is not configured, so confirmation messages are not sent.</Text> : null}
+          {visibleError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{visibleError}</Text> : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || !email.trim() || !password}
+            onPress={() => void submit()}
+            style={[styles.primary, (busy || !email.trim() || !password) && styles.disabled]}
+          >
+            <Text style={styles.primaryText}>{busy ? 'Please wait…' : registration ? 'Create account' : 'Sign in'}</Text>
+          </Pressable>
+          <View style={styles.links}>
+            {registration ? (
+              <Link href="/sign-in" style={styles.link}>Already have an account? Sign in</Link>
+            ) : (
+              <>
+                <Link href="/sign-up" style={styles.link}>Create an account</Link>
+                <Link href="/forgot-password" style={styles.link}>Forgot password?</Link>
+              </>
+            )}
+          </View>
         </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, justifyContent: 'center', padding: 20, backgroundColor: '#f3f5ed' },
-  card: { width: '100%', maxWidth: 480, alignSelf: 'center', gap: 12, padding: 26, borderRadius: 18, backgroundColor: '#ffffff' },
+  screen: { flex: 1, backgroundColor: '#183f32' },
+  scroll: { flex: 1, zIndex: 1, backgroundColor: 'transparent' },
+  page: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  card: { width: '100%', maxWidth: 480, alignSelf: 'center', gap: 12, padding: 26, borderRadius: 18, backgroundColor: 'rgba(255, 255, 255, 0.8)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.6)', boxShadow: '0 18px 48px rgba(0, 0, 0, 0.35)' },
   brand: { color: '#235946', fontSize: 13, fontWeight: '900', letterSpacing: 2 },
   title: { color: '#183f32', fontSize: 30, fontWeight: '800' },
   description: { marginBottom: 8, color: '#526259', fontSize: 15, lineHeight: 22 },

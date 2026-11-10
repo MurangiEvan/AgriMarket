@@ -2,6 +2,7 @@ import { Link, usePathname } from 'expo-router';
 import { createContext, useContext, useState, type PropsWithChildren } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
+import { BackButton } from '@/components/back-button';
 import { useSession } from '@/components/session-provider';
 
 type AppThemeValue = { isDark: boolean; toggleTheme: () => void };
@@ -30,6 +31,9 @@ export default function AppNavigation({ children }: PropsWithChildren) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const isDark = themeOverride ?? colorScheme === 'dark';
   const visibleDestinations = destinations.filter((destination) => destination.href !== '/market' || user?.role === 'buyer');
+  const home = user?.role === 'buyer' ? '/market' : user?.role === 'seller' ? '/account' : user?.role === 'admin' ? '/admin' : '/';
+  // Every page except the role's home (and the landing page) gets a back button.
+  const showBack = pathname !== home && pathname !== '/';
 
   function toggleTheme() {
     setThemeOverride(!isDark);
@@ -40,6 +44,7 @@ export default function AppNavigation({ children }: PropsWithChildren) {
       <View style={StyleSheet.flatten([styles.shell, isDark && styles.shellDark])}>
         {offline ? <View accessibilityRole="alert" style={styles.offlineBanner}><Text style={styles.offlineText}>Offline — showing the last signed-in app shell. Changes are unavailable.</Text></View> : null}
         {sessionError ? <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorText}>{sessionError}</Text></View> : null}
+        {showBack ? <View style={styles.backBar}><BackButton fallback={home} variant="floating" dark={isDark} /></View> : null}
         <View style={styles.content}>{children}</View>
         <Pressable
           accessibilityRole="button"
@@ -118,7 +123,8 @@ export default function AppNavigation({ children }: PropsWithChildren) {
 const styles = StyleSheet.create({
   shell: { flex: 1, minHeight: '100%', backgroundColor: '#f3f5ed' },
   shellDark: { backgroundColor: '#121613' },
-  content: { flex: 1, paddingBottom: 78 },
+  content: { flex: 1, paddingBottom: 92 },
+  backBar: { paddingTop: 14, paddingLeft: 12, paddingRight: 68, paddingBottom: 2, alignItems: 'flex-start' },
   offlineBanner: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#f4e3b2' },
   offlineText: { color: '#3e3217', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   errorBanner: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#f7dede' },
@@ -131,11 +137,11 @@ const styles = StyleSheet.create({
   actionMark: { color: '#235946', fontSize: 20, lineHeight: 24 },
   actionText: { color: '#183f32', fontSize: 9, fontWeight: '700', textAlign: 'center' },
   actionTextDark: { color: '#f3f5ed' },
-  navOuter: { position: 'fixed' as never, left: 0, right: 0, bottom: 0, zIndex: 10, borderTopWidth: 1, borderTopColor: '#d8ded4', backgroundColor: 'rgba(248, 249, 244, 0.97)' },
-  nav: { width: '100%', maxWidth: 1120, minHeight: 72, alignSelf: 'center', paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  navItem: { minWidth: 62, minHeight: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 12, gap: 2 },
-  navItemActive: { backgroundColor: '#e4eadf' },
+  navOuter: { position: 'fixed' as never, left: 0, right: 0, bottom: 0, zIndex: 10, paddingHorizontal: 12, paddingBottom: 10 },
+  nav: { width: '100%', maxWidth: 640, minHeight: 66, alignSelf: 'center', paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', gap: 4, borderRadius: 24, borderWidth: 1, borderColor: '#e3e8de', backgroundColor: 'rgba(255, 255, 255, 0.98)', boxShadow: '0 10px 30px rgba(24, 63, 50, 0.16)' },
+  navItem: { minWidth: 64, minHeight: 50, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 18, gap: 2 },
+  navItemActive: { backgroundColor: '#235946' },
   navMark: { color: '#65736a', fontSize: 21, lineHeight: 25 },
   navText: { color: '#65736a', fontSize: 11, fontWeight: '600' },
-  navTextActive: { color: '#183f32' },
+  navTextActive: { color: '#ffffff' },
 });

@@ -21,6 +21,7 @@ import {
 } from './schema.js';
 
 export const DEMO_PASSWORD = 'DemoSeller2026!';
+const DEMO_BUYER_EMAIL = 'demo.buyer@example.com';
 
 type Art = 'tomatoes' | 'cherry' | 'peppers' | 'cabbage' | 'spinach' | 'butternut' | 'carrots' | 'onions' | 'potatoes';
 type DemoListing = {
@@ -257,7 +258,20 @@ try {
     console.info(`Created ${seller.business.name} (${seller.email}) with ${seller.listings.length} listings.`);
   }
 
-  console.info(`Demo sellers can sign in with password: ${DEMO_PASSWORD}`);
+  // A buyer saved in Tzaneen so the nearby market shows both demo sellers.
+  await removeExistingDemo(DEMO_BUYER_EMAIL);
+  await db.insert(users).values({
+    email: DEMO_BUYER_EMAIL,
+    passwordHash,
+    role: 'buyer',
+    emailVerifiedAt: new Date(),
+    locationLabel: 'Tzaneen, Limpopo, South Africa',
+    locationLatitude: -23.833,
+    locationLongitude: 30.164,
+  });
+  console.info(`Created demo buyer (${DEMO_BUYER_EMAIL}).`);
+
+  console.info(`Demo accounts can sign in with password: ${DEMO_PASSWORD}`);
   if (!admin) console.info('No admin account exists, so approvals were not recorded in the audit log.');
 } finally {
   await pool.end();

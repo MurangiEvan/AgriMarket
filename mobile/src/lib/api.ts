@@ -138,11 +138,18 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return parseResponse<T>(response);
 }
 
+const UPLOAD_TIMEOUT_MS = 120_000;
+
 async function performRequest(path: string, init: RequestInit): Promise<Response> {
   ensureSecureApi();
+  // Uploads get a time limit so a stalled connection ends with a clear message instead of spinning forever.
+  const upload = init.body instanceof FormData;
+  const controller = upload && !init.signal ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS) : null;
   try {
     return await fetch(`${API_BASE_URL}${path}`, {
       ...init,
+      ...(controller ? { signal: controller.signal } : {}),
       credentials: 'include',
       headers: {
         ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
@@ -152,9 +159,14 @@ async function performRequest(path: string, init: RequestInit): Promise<Response
       },
     });
   } catch {
+    if (controller?.signal.aborted) {
+      throw new ApiError('The upload is taking too long. Check your internet connection and try again, or choose a smaller file.');
+    }
     throw new ApiError(
       'AgriMarket could not reach the service. Check that your phone and computer are on the same Wi-Fi and that the API is running.',
     );
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

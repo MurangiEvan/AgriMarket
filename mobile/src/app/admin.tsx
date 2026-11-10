@@ -4,6 +4,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { Image } from 'expo-image';
 
 import { ApiError, apiRequest, apiResourceUrl } from '@/lib/api';
+import { greeting, HeroPill, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
 
 type VerificationItem = {
@@ -98,16 +99,18 @@ export default function AdminScreen() {
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <View style={styles.frame}>
-        <Text style={styles.eyebrow}>AUTHORIZED STAFF</Text>
-        <Text accessibilityRole="header" style={styles.title}>Review queue</Text>
-        <Text style={styles.body}>A human decision is required for each submitted business. Every decision is auditable.</Text>
+        <PageHero eyebrow="AUTHORIZED STAFF" title={greeting()} subtitle="Check seller documents and produce photos. Every decision is recorded in the audit log.">
+          <HeroPill label={queue.length === 1 ? 'business' : 'businesses'} value={queue.length} />
+          <HeroPill label={listings.length === 1 ? 'photo' : 'photos'} value={listings.length} />
+        </PageHero>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>Review queue</Text>
         {queue.length === 0 ? <View style={styles.empty}><Text style={styles.panelTitle}>No pending submissions</Text><Text style={styles.body}>New verification requests will appear here.</Text></View> : null}
         {queue.map((item) => <View key={item.id} style={styles.panel}>
           <View style={styles.itemHeader}><View style={styles.itemCopy}><Text style={styles.panelTitle}>{item.businessName}</Text><Text style={styles.body}>{item.ownerEmail} · {item.province}</Text></View><Text style={styles.documentCount}>{item.documentCount} docs</Text></View>
           <Text style={styles.date}>Submitted {new Date(item.submittedAt).toLocaleString()}</Text>
           <View style={styles.docLinks}>{Array.from({ length: item.documentCount }, (_, index) => <Pressable key={index} accessibilityRole="button" onPress={() => openDocument(item.id, index)} style={styles.docButton}><Text style={styles.docText}>Document {index + 1}</Text></Pressable>)}</View>
           <Text style={styles.fieldLabel}>Feedback visible to seller (required when rejecting)</Text>
-          <TextInput accessibilityLabel={`Seller feedback for ${item.businessName}`} multiline value={feedback[item.id] ?? ''} onChangeText={(value) => setFeedback((current) => ({ ...current, [item.id]: value }))} style={styles.input} />
+          <TextInput accessibilityLabel={`Seller feedback for ${item.businessName}`} placeholder="e.g. Please upload a clearer copy of your CIPC registration certificate." placeholderTextColor="#7a877f" multiline value={feedback[item.id] ?? ''} onChangeText={(value) => setFeedback((current) => ({ ...current, [item.id]: value }))} style={styles.input} />
           <View style={styles.actions}>
             <Pressable accessibilityRole="button" disabled={busyId === item.id} onPress={() => decide(item.id, 'approved')} style={styles.approve}><Text style={styles.approveText}>Approve business</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={busyId === item.id} onPress={() => decide(item.id, 'rejected')} style={styles.reject}><Text style={styles.rejectText}>Reject</Text></Pressable>
@@ -138,15 +141,14 @@ export default function AdminScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { paddingHorizontal: 20, paddingVertical: 28, paddingBottom: 55, backgroundColor: '#f3f5ed' },
-  frame: { width: '100%', maxWidth: 920, alignSelf: 'center', gap: 13 },
+  page: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 55, backgroundColor: '#f3f5ed' },
+  frame: { width: '100%', maxWidth: 920, alignSelf: 'center', gap: 14 },
   denied: { flex: 1, minHeight: 320, padding: 24, justifyContent: 'center', gap: 12, backgroundColor: '#f3f5ed' },
-  eyebrow: { color: '#a05d3c', fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
   title: { color: '#183f32', fontFamily: 'Georgia', fontSize: 32 },
   sectionTitle: { marginTop: 18, color: '#183f32', fontFamily: 'Georgia', fontSize: 24 },
   body: { color: '#65736a', fontSize: 12, lineHeight: 18 },
-  panel: { padding: 16, gap: 10, borderColor: '#d8ded4', borderWidth: 1, borderRadius: 8, backgroundColor: '#fffefa' },
-  empty: { minHeight: 100, padding: 17, justifyContent: 'center', gap: 7, borderColor: '#d8ded4', borderWidth: 1, borderRadius: 8, backgroundColor: '#fffefa' },
+  panel: { padding: 20, gap: 12, borderColor: '#e3e8de', borderWidth: 1, borderRadius: 18, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
+  empty: { minHeight: 100, padding: 20, justifyContent: 'center', gap: 7, borderColor: '#e3e8de', borderWidth: 1, borderRadius: 18, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.06)' },
   itemHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   itemCopy: { flex: 1, gap: 4 },
   panelTitle: { color: '#183f32', fontSize: 14, fontWeight: '800' },
@@ -162,7 +164,7 @@ const styles = StyleSheet.create({
   approveText: { color: '#fffefa', fontSize: 11, fontWeight: '800' },
   reject: { minHeight: 39, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 4, backgroundColor: '#f3e3da' },
   rejectText: { color: '#963f31', fontSize: 11, fontWeight: '800' },
-  listingRow: { minHeight: 65, paddingVertical: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderBottomColor: '#d8ded4' },
+  listingRow: { minHeight: 65, padding: 14, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14, borderWidth: 1, borderColor: '#e3e8de', borderRadius: 18, backgroundColor: '#ffffff', boxShadow: '0 8px 28px rgba(24, 63, 50, 0.08)' },
   listingPhoto: { width: 96, height: 96, borderRadius: 8, backgroundColor: '#e4eadf' },
   listingPhotoMissing: { alignItems: 'center', justifyContent: 'center' },
   auditRow: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#d8ded4' },

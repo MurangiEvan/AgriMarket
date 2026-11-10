@@ -2,6 +2,7 @@ import { Link } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { BackButton } from '@/components/back-button';
 import { ApiError, requestPasswordReset } from '@/lib/api';
 
 export default function ForgotPasswordScreen() {
@@ -26,6 +27,7 @@ export default function ForgotPasswordScreen() {
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
+        <BackButton fallback="/sign-in" />
         <Text style={styles.brand}>AGRIMARKET</Text>
         <Text accessibilityRole="header" style={styles.title}>Reset your password</Text>
         {sentMessage ? (
@@ -42,6 +44,8 @@ export default function ForgotPasswordScreen() {
             <Text style={styles.label}>Email</Text>
             <TextInput
               accessibilityLabel="Email"
+              placeholder="e.g. you@example.com"
+              placeholderTextColor="#7a877f"
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
