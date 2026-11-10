@@ -20,6 +20,7 @@ const environmentSchema = z.object({
   MAIL_FROM_EMAIL: z.email().optional(),
   MAIL_FROM_NAME: z.string().trim().min(1).max(70).default('AgriMarket'),
   PASSWORD_RESET_URL: z.url().optional(),
+  WEB_APP_DIR: z.string().trim().min(1).optional(),
 }).superRefine((environment, context) => {
   if (environment.BREVO_API_KEY && !environment.MAIL_FROM_EMAIL) {
     context.addIssue({ code: 'custom', path: ['MAIL_FROM_EMAIL'], message: 'Brevo email requires MAIL_FROM_EMAIL (a sender verified in Brevo).' });
@@ -67,5 +68,13 @@ const environmentSchema = z.object({
 export type Environment = z.infer<typeof environmentSchema>;
 
 export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Environment {
-  return environmentSchema.parse(source);
+  // On Render the web app and API share the service's public URL, so default the
+  // client origin and CORS allowlist to it instead of requiring them to be typed in.
+  const renderUrl = source.RENDER_EXTERNAL_URL?.replace(/\/$/, '');
+  const clientOrigin = source.CLIENT_ORIGIN || renderUrl;
+  return environmentSchema.parse({
+    ...source,
+    CLIENT_ORIGIN: clientOrigin,
+    CORS_ORIGINS: source.CORS_ORIGINS || (renderUrl ? clientOrigin : undefined),
+  });
 }

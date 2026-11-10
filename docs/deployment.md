@@ -14,6 +14,10 @@ Authentication uses a 15-minute signed access token and a 30-day rotating refres
 
 Offline mode stores no browser authentication token or personal profile data. It retains only a non-secret last-known role hint and caches public categories/listings; private API responses are never service-worker cached. The offline shell is provisional until the server can revalidate the session.
 
+## Render Blueprint (Single Service)
+
+`render.yaml` deploys one Render web service that serves both the API (`/api/v1`) and the exported Expo web app (`WEB_APP_DIR=../mobile/dist`) from the same HTTPS origin. This keeps session cookies first-party; separate `*.onrender.com` services would be cross-site, and Safari/private browsing block such cookies. `CLIENT_ORIGIN` and `CORS_ORIGINS` default to Render's `RENDER_EXTERNAL_URL`; set them explicitly when adding a custom domain. The web build leaves `EXPO_PUBLIC_API_URL` unset so the browser calls the origin it was loaded from. The build runs `npm run db:migrate` because the free plan has no pre-deploy step. Production refuses local storage, so Cloudinary credentials (with the correct cloud name) and Brevo are required. Native builds for the Render API must set `EXPO_PUBLIC_API_URL=https://<service>.onrender.com/api/v1`.
+
 ## Neon And Render
 
 Provision Neon PostgreSQL and configure its connection string in the API service secret store. Back up before migrations; run migrations as a release step and verify readiness afterward. Deploy the Express API as a Render web service. Export the Expo web app as static output and deploy `mobile/dist` to Render Static Site or another static host. Configure HTTPS, exact CORS/client origins, health checks, and secret values. Deployment is not performed by this repository change.

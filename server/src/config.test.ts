@@ -16,6 +16,14 @@ const validProduction = {
   MAIL_FROM_EMAIL: 'no-reply@agrimarket.example.test',
 };
 
+test('on Render the client origin and CORS allowlist default to the service URL', () => {
+  const { CLIENT_ORIGIN: _client, CORS_ORIGINS: _cors, ...withoutOrigins } = validProduction;
+  const environment = loadEnvironment({ ...withoutOrigins, RENDER_EXTERNAL_URL: 'https://agrimarket.onrender.com' });
+  assert.equal(environment.CLIENT_ORIGIN, 'https://agrimarket.onrender.com');
+  assert.equal(environment.CORS_ORIGINS, 'https://agrimarket.onrender.com');
+  assert.equal(loadEnvironment({ ...validProduction, RENDER_EXTERNAL_URL: 'https://agrimarket.onrender.com' }).CLIENT_ORIGIN, 'https://agrimarket.example.test');
+});
+
 test('Brevo email requires a sender and is mandatory in production', () => {
   assert.equal(loadEnvironment(validProduction).MAIL_FROM_NAME, 'AgriMarket');
   assert.throws(() => loadEnvironment({ ...validProduction, BREVO_API_KEY: undefined }));

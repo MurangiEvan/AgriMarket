@@ -4,7 +4,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 
-const API_BASE_URL = resolveApiBaseUrl((process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1').replace(/\/$/, ''));
+// Without EXPO_PUBLIC_API_URL the web build talks to the server it was loaded from (production on Render).
+const API_BASE_URL = resolveApiBaseUrl(
+  (
+    process.env.EXPO_PUBLIC_API_URL ||
+    (Platform.OS === 'web' && typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:4000/api/v1')
+  ).replace(/\/$/, ''),
+);
 const REFRESH_TOKEN_KEY = 'agrimarket-refresh-token';
 let accessToken: string | null = null;
 let refreshInFlight: Promise<boolean> | null = null;

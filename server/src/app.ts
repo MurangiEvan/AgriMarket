@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { parseCookie } from 'cookie';
 import cors from 'cors';
 import { and, asc, eq } from 'drizzle-orm';
@@ -40,7 +42,18 @@ export function createApplication(
 
   app.disable('x-powered-by');
   app.set('trust proxy', environment.NODE_ENV === 'production' ? 1 : false);
-  app.use(helmet());
+  const apiHelmet = helmet();
+  // The exported Expo pages include small inline bootstrap scripts and preview picked photos via blob: URLs.
+  const webHelmet = helmet({
+    contentSecurityPolicy: {
+      directives: {
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        connectSrc: ["'self'"],
+      },
+    },
+  });
+  app.use((request, response, next) => (request.path.startsWith('/api/') ? apiHelmet : webHelmet)(request, response, next));
   app.use(
     cors({
       credentials: true,
@@ -147,6 +160,23 @@ export function createApplication(
   app.use('/api/v1/enquiries', enquiryLimiter, createBuyerEnquiriesRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/seller/enquiries', createSellerEnquiriesRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/admin', createAdminRouter(db, storage, environment.SESSION_SECRET));
+
+  if (environment.WEB_APP_DIR) {
+    // Serve the exported Expo web app from the same origin as the API (single Render service).
+    const webAppDir = path.resolve(environment.WEB_APP_DIR);
+    app.use(
+      express.static(webAppDir, {
+        extensions: ['html'],
+        setHeaders(response, filePath) {
+          const hashedAsset = filePath.includes(`${path.sep}_expo${path.sep}`);
+          response.setHeader('Cache-Control', hashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache');
+        },
+      }),
+    );
+    app.get(/^(?!\/api\/).*/, (_request, response) => {
+      response.status(404).setHeader('Cache-Control', 'no-cache').sendFile(path.join(webAppDir, '+not-found.html'));
+    });
+  }
 
   app.use((_request, _response, next) => next(new HttpError(404, 'NOT_FOUND', 'The requested endpoint was not found.')));
   app.use(errorHandler);

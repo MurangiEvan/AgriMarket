@@ -1,0 +1,43 @@
+# AgriMarket on Render: one web service serves the Express API (/api/v1) and the
+# exported Expo web app from the same HTTPS origin, so session cookies stay first-party.
+# Database: existing Neon PostgreSQL (DATABASE_URL). Files: Cloudinary. Email: Brevo.
+services:
+  - type: web
+    name: agrimarket
+    runtime: node
+    plan: free
+    region: ohio # same region as the Neon database (us-east-2)
+    branch: main
+    buildCommand: >-
+      cd mobile && npm ci --include=dev && npm run build:web &&
+      cd ../server && npm ci --include=dev && npm run build && npm run db:migrate
+    startCommand: cd server && npm start
+    healthCheckPath: /api/v1/health/ready
+    envVars:
+      - key: NODE_VERSION
+        value: "26"
+      - key: NODE_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: WEB_APP_DIR
+        value: ../mobile/dist
+      - key: UPLOAD_STORAGE_DRIVER
+        value: cloudinary
+      - key: MAIL_FROM_NAME
+        value: AgriMarket
+      - key: SESSION_SECRET
+        generateValue: true
+      # Secrets: enter these in the Render Dashboard when applying the Blueprint.
+      - key: DATABASE_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM_EMAIL
+        sync: false
