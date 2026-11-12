@@ -10,7 +10,8 @@
       },
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://agrimarket-f059.onrender.com/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://agrimarket-f059.onrender.com/api/v1",
+        "EXPO_PUBLIC_ADMIN_URL": "https://agri-market-indol-tau.vercel.app"
       }
     },
     "production": {
@@ -18,7 +19,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://agrimarket-f059.onrender.com/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://agrimarket-f059.onrender.com/api/v1",
+        "EXPO_PUBLIC_ADMIN_URL": "https://agri-market-indol-tau.vercel.app"
       }
     }
   }
