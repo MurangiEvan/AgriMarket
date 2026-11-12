@@ -1,6 +1,7 @@
 import { Link } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -28,6 +29,18 @@ type Verification = { verificationStatus: string; submissions: { id: string; sta
 type NativeUploadFile = { uri: string; name: string; type: string };
 type ListingPhotoDraft = NativeUploadFile & { file?: File };
 
+const MAX_DOCUMENTS = 5;
+
+// Mirrors the server's completeness check so the seller sees what is missing before submitting.
+function missingBusinessDetails(details: { name: string; description: string; town: string; contactEmail: string; contactPhone: string; whatsappPhone: string }) {
+  const missing: string[] = [];
+  if (details.name.trim().length < 2) missing.push('business name');
+  if (details.description.trim().length < 10) missing.push('a description (10+ characters)');
+  if (!details.town.trim()) missing.push('town or area');
+  if (!details.contactEmail.trim() && !details.contactPhone.trim() && !details.whatsappPhone.trim()) missing.push('a contact number or email');
+  return missing;
+}
+
 const provinces = ['Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'Northern Cape', 'North West', 'Western Cape'];
 
 function appendNativeUpload(form: FormData, field: string, file: NativeUploadFile) {
@@ -54,6 +67,31 @@ function pickWebFiles(accept: string, multiple: boolean, onPicked: (files: File[
   picker.click();
 }
 
+// Phone camera photos are often 4–12 MB, above the server's 5 MB limit, and slow on mobile data.
+// The server stores listing photos at up to 1600 px anyway, so shrink to that size first and
+// save as JPEG. That is usually a few hundred KB.
+const MAX_PHOTO_SIDE = 1600;
+
+async function shrinkPhotoForUpload(image: ImagePicker.ImagePickerAsset): Promise<ListingPhotoDraft> {
+  const original: ListingPhotoDraft = {
+    uri: image.uri,
+    name: image.fileName ?? `listing-image.${image.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg'}`,
+    type: image.mimeType ?? 'image/jpeg',
+  };
+  try {
+    const context = ImageManipulator.manipulate(image.uri);
+    if (image.width > MAX_PHOTO_SIDE || image.height > MAX_PHOTO_SIDE) {
+      context.resize(image.width >= image.height ? { width: MAX_PHOTO_SIDE } : { height: MAX_PHOTO_SIDE });
+    }
+    const rendered = await context.renderAsync();
+    const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.JPEG });
+    return { uri: saved.uri, name: 'listing-photo.jpg', type: 'image/jpeg' };
+  } catch {
+    // If shrinking fails, send the original; the server still checks the size.
+    return original;
+  }
+}
+
 function appendListingPhoto(form: FormData, photo: ListingPhotoDraft) {
   if (photo.file) {
     form.append('images', photo.file, photo.name);
@@ -78,6 +116,7 @@ export default function AccountScreen() {
       {user.role === 'seller' ? <SellerDashboard user={user} /> : null}
       {user.role === 'buyer' ? <BuyerDashboard /> : null}
       {user.role === 'admin' ? <Link href="/admin" style={styles.linkText}>Open administrator review</Link> : null}
+      <Link href="/help" style={styles.linkText}>Help & support</Link>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
     </AccountFrame>
   );
@@ -113,8 +152,21 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const visibleListings = listings.filter((listing) => listing.status !== 'archived');
   const [listingPhotoDraft, setListingPhotoDraft] = useState<ListingPhotoDraft | null>(null);
   const [photoNote, setPhotoNote] = useState('');
+  // Documents chosen for the application are kept on the phone until "Submit application".
+  const [applicationDocuments, setApplicationDocuments] = useState<ListingPhotoDraft[]>([]);
   const [busy, setBusy] = useState(false);
-  const [uploadingDocuments, setUploadingDocuments] = useState(false);
+  const [submittingApplication, setSubmittingApplication] = useState(false);
+  const applicationStatus = verification?.verificationStatus ?? business?.verificationStatus ?? 'not_submitted';
+  const approved = applicationStatus === 'approved';
+  const applying = applicationStatus === 'not_submitted' || applicationStatus === 'rejected';
+  const latestFeedback = verification?.submissions.find((submission) => submission.status === 'rejected')?.sellerFeedback;
+  const missingDetails = missingBusinessDetails({ name, description, town, contactEmail, contactPhone, whatsappPhone });
+  const applicationChecklist = [
+    { done: missingDetails.length === 0, label: missingDetails.length ? `Business details: add ${missingDetails.join(', ')}` : 'Business details complete' },
+    { done: applicationDocuments.length > 0, label: applicationDocuments.length ? `${applicationDocuments.length} verification ${applicationDocuments.length === 1 ? 'document' : 'documents'} added` : 'Add at least one verification document' },
+    { done: Boolean(produceTypeId && listingPhotoDraft), label: produceTypeId && listingPhotoDraft ? 'Produce photo added' : 'Choose what you sell and add a photo' },
+  ];
+  const applicationReady = applicationChecklist.every((item) => item.done);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -261,30 +313,26 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] });
       const image = selection.canceled ? undefined : selection.assets[0];
       if (!image) return;
-      const extension = image.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
-      setListingPhotoDraft({
-        uri: image.uri,
-        name: image.fileName ?? `listing-image.${extension}`,
-        type: image.mimeType ?? 'image/jpeg',
-      });
+      setListingPhotoDraft(await shrinkPhotoForUpload(image));
     } catch {
       setError('The photo library could not be opened. Check the app permissions and try again.');
     }
   }
 
 
+  function addApplicationDocuments(files: ListingPhotoDraft[]) {
+    setError('');
+    setApplicationDocuments((current) => {
+      const combined = [...current, ...files];
+      if (combined.length > MAX_DOCUMENTS) setError(`You can add up to ${MAX_DOCUMENTS} documents. Remove one to add another.`);
+      return combined.slice(0, MAX_DOCUMENTS);
+    });
+  }
+
   async function chooseDocuments() {
     if (Platform.OS === 'web') {
       pickWebFiles('application/pdf,image/jpeg,image/png', true, (files) => {
-        if (files.length > 5) {
-          setError('Choose no more than five verification documents.');
-          return;
-        }
-        void runAction(async () => {
-          const form = new FormData();
-          files.forEach((file) => form.append('documents', file));
-          await apiRequest('/seller/verification', { method: 'POST', body: form });
-        }, 'Verification documents submitted for review.', setUploadingDocuments);
+        addApplicationDocuments(files.map((file) => ({ uri: '', name: file.name, type: file.type || 'application/pdf', file })));
       });
       return;
     }
@@ -295,37 +343,84 @@ function SellerDashboard({ user }: { user: SessionUser }) {
         multiple: true,
         copyToCacheDirectory: true,
       });
-      if (selection.canceled) return;
-      if (selection.assets.length > 5) {
-        setError('Choose no more than five verification documents.');
-        return;
-      }
-      if (!selection.assets.length) return;
-      void runAction(async () => {
-        const form = new FormData();
-        selection.assets.forEach((file) => {
-          const extension = file.name.split('.').pop()?.toLowerCase();
-          const fallbackMimeType = extension === 'pdf'
-            ? 'application/pdf'
-            : extension === 'png'
-              ? 'image/png'
-              : 'image/jpeg';
-          appendNativeUpload(form, 'documents', {
-            uri: file.uri,
-            name: file.name,
-            type: file.mimeType ?? fallbackMimeType,
-          });
-        });
-        await apiRequest('/seller/verification', { method: 'POST', body: form });
-      }, 'Verification documents submitted for review.', setUploadingDocuments);
+      if (selection.canceled || !selection.assets.length) return;
+      addApplicationDocuments(selection.assets.map((file) => {
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        const fallbackMimeType = extension === 'pdf' ? 'application/pdf' : extension === 'png' ? 'image/png' : 'image/jpeg';
+        return { uri: file.uri, name: file.name, type: file.mimeType ?? fallbackMimeType };
+      }));
     } catch {
       setError('The document picker could not be opened. Try again or choose another file.');
     }
   }
 
+  // Sends the whole application at once: the latest business details, the documents and the
+  // produce photo. The server only accepts it when every part is present.
+  async function submitApplication() {
+    if (!applicationReady || !listingPhotoDraft) {
+      setError('Complete all three steps before submitting your application.');
+      return;
+    }
+    const photo = listingPhotoDraft;
+    await runAction(async () => {
+      await apiRequest('/seller/business', {
+        method: 'PUT',
+        body: JSON.stringify({ name, description, address: address || null, province, town: town || null, contactEmail: contactEmail || null, contactPhone: contactPhone || null, whatsappPhone: whatsappPhone || null }),
+      });
+      const form = new FormData();
+      for (const document of applicationDocuments) {
+        if (document.file) form.append('documents', document.file, document.name);
+        else appendNativeUpload(form, 'documents', document);
+      }
+      if (photo.file) form.append('photo', photo.file, photo.name);
+      else appendNativeUpload(form, 'photo', photo);
+      form.append('categoryId', categoryId);
+      form.append('produceTypeId', produceTypeId);
+      if (photoNote.trim()) form.append('note', photoNote.trim());
+      await apiRequest('/seller/application', { method: 'POST', body: form });
+      setApplicationDocuments([]);
+      setListingPhotoDraft(null);
+      setPhotoNote('');
+    }, 'Application submitted. The admin will review your details, documents and photo together, and you will get a notification with the result.', setSubmittingApplication);
+  }
+
+  // Category, produce type, photo and note: used for the application photo and, after approval, for extra photos.
+  const producePicker = (
+    <>
+      <Text style={styles.fieldLabel}>Category</Text>
+      <View style={styles.choiceWrap}>{categories.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: categoryId === item.id }} onPress={() => { setCategoryId(item.id); setProduceTypeId(''); }} style={[styles.choice, categoryId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, categoryId === item.id && styles.choiceTextActive]}>{categoryIcon(item.slug)} {item.name}</Text></Pressable>)}</View>
+      <Text style={styles.fieldLabel}>What is it?</Text>
+      <View style={styles.choiceWrap}>{produceTypes.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: produceTypeId === item.id }} onPress={() => setProduceTypeId(item.id)} style={[styles.choice, produceTypeId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, produceTypeId === item.id && styles.choiceTextActive]}>{produceIcon(item.name, selectedCategorySlug)} {item.name}</Text></Pressable>)}</View>
+      {produceTypes.length === 0 ? <Text style={styles.helper}>{produceTypesLoading ? 'Loading produce types…' : 'No produce types are available for this category yet.'}</Text> : null}
+      <Text style={styles.fieldLabel}>Photo</Text>
+      {listingPhotoDraft ? <View style={styles.photoPreview}>
+        <Image accessibilityLabel="Selected produce photo preview" source={{ uri: listingPhotoDraft.uri }} contentFit="cover" style={styles.photoPreviewImage} />
+        <View style={styles.photoPreviewFields}>
+          <Text style={styles.muted} numberOfLines={1}>{listingPhotoDraft.name}</Text>
+          <Pressable accessibilityRole="button" onPress={() => setListingPhotoDraft(null)} style={styles.smallButton}><Text style={styles.smallButtonText}>Choose a different photo</Text></Pressable>
+        </View>
+      </View> : <Pressable accessibilityRole="button" disabled={busy || submittingApplication} onPress={() => void chooseNewListingPhoto()} style={styles.secondaryButton}><Text style={styles.secondaryText}>Choose photo</Text></Pressable>}
+      <Text style={styles.helper}>JPEG, PNG or WebP. A clear, well-lit photo helps buyers.</Text>
+      <Text style={styles.fieldLabel}>Short note for buyers (optional)</Text>
+      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes in 10 kg boxes, harvested every week" placeholderTextColor="#7a877f" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
+    </>
+  );
+
+  const banner = applicationStatus === 'approved'
+    ? { tone: styles.bannerSuccess, title: 'Your business is verified', body: 'Buyers can find you in the market. Add more produce photos below; each one is checked by the admin before buyers see it.' }
+    : applicationStatus === 'pending'
+      ? { tone: styles.bannerWaiting, title: 'Your application is with the admin', body: 'The admin is reviewing your business details, documents and photo. You will get a notification as soon as it has been reviewed.' }
+      : applicationStatus === 'rejected'
+        ? { tone: styles.bannerProblem, title: 'Your application needs changes', body: `${latestFeedback ? `Admin feedback: ${latestFeedback} ` : ''}Fix what was asked, then submit the whole application again with your documents and a photo.` }
+        : { tone: styles.bannerInfo, title: 'Apply to sell on AgriMarket', body: 'Complete the three steps below and submit them together. The admin reviews your whole application before buyers can see your business.' };
+
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Business profile</Text><Text style={styles.statusTag}>{formatStatus(business?.verificationStatus ?? 'not_submitted')}</Text></View>
+      <View style={[styles.banner, banner.tone]} accessibilityRole="summary">
+        <Text style={styles.bannerTitle}>{banner.title}</Text>
+        <Text style={styles.bannerBody}>{banner.body}</Text>
+      </View>
+      <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{applying ? 'Step 1 · Business details' : 'Business profile'}</Text><Text style={styles.statusTag}>{formatStatus(applicationStatus)}</Text></View>
       <Text style={styles.muted}>Your business profile is visible publicly only after approval and publication.</Text>
       <Text style={styles.fieldLabel}>Business name</Text><TextInput accessibilityLabel="Business name" placeholder="e.g. Tomatoes by Thabo" placeholderTextColor="#7a877f" value={name} onChangeText={setName} style={styles.input} />
       <Text style={styles.fieldLabel}>Business description</Text><TextInput accessibilityLabel="Business description" placeholder="e.g. Family farm near Tzaneen growing tomatoes and peppers. We supply spaza shops and restaurants every week." placeholderTextColor="#7a877f" multiline value={description} onChangeText={setDescription} style={[styles.input, styles.multiline]} />
@@ -336,12 +431,70 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       <Text style={styles.fieldLabel}>Contact email</Text><TextInput accessibilityLabel="Contact email" placeholder="e.g. orders@yourfarm.co.za" placeholderTextColor="#7a877f" autoCapitalize="none" keyboardType="email-address" value={contactEmail} onChangeText={setContactEmail} style={styles.input} />
       <Text style={styles.fieldLabel}>Mobile number</Text><TextInput accessibilityLabel="Mobile number" placeholder="e.g. 082 123 4567" placeholderTextColor="#7a877f" keyboardType="phone-pad" value={contactPhone} onChangeText={setContactPhone} style={styles.input} />
       <Text style={styles.fieldLabel}>WhatsApp number</Text><TextInput accessibilityLabel="WhatsApp number" placeholder="e.g. 082 123 4567" placeholderTextColor="#7a877f" keyboardType="phone-pad" value={whatsappPhone} onChangeText={setWhatsappPhone} style={styles.input} />
-      <Pressable accessibilityRole="button" disabled={busy || name.trim().length < 2} onPress={saveBusiness} style={[styles.primaryButton, busy && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Saving…' : 'Save business profile'}</Text></Pressable>
+      <Pressable accessibilityRole="button" disabled={busy || name.trim().length < 2} onPress={saveBusiness} style={[styles.primaryButton, busy && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Saving…' : applying ? 'Save details for later' : 'Save changes'}</Text></Pressable>
 
-      <View style={styles.rule} />
-      <Text style={styles.sectionTitle}>Your produce photos</Text>
-      <Text style={styles.muted}>Add a photo of what you sell and choose what it is. Each photo is checked by the admin, then shown to buyers in the market under that produce.</Text>
-      {visibleListings.length === 0 ? <Text style={styles.helper}>No photos yet. Add your first one below.</Text> : (
+      {applying ? (
+        <>
+          <View style={styles.rule} />
+          <Text style={styles.sectionTitle}>Step 2 · Verification documents</Text>
+          <Text style={styles.muted}>Proof that your business is real, such as a CIPC registration certificate, a farm lease or a municipal trading permit. Documents are private: only an authorised administrator can see them.</Text>
+          {applicationDocuments.map((document, index) => (
+            <View key={`${document.name}-${index}`} style={styles.documentRow}>
+              <Text style={styles.documentName} numberOfLines={1}>📄 {document.name}</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${document.name}`} onPress={() => setApplicationDocuments((current) => current.filter((_, position) => position !== index))} style={styles.smallButton}><Text style={styles.smallButtonText}>Remove</Text></Pressable>
+            </View>
+          ))}
+          <Pressable accessibilityRole="button" disabled={applicationDocuments.length >= MAX_DOCUMENTS} onPress={() => void chooseDocuments()} style={[styles.secondaryButton, applicationDocuments.length >= MAX_DOCUMENTS && styles.disabled]}>
+            <Text style={styles.secondaryText}>{applicationDocuments.length ? 'Add another document' : 'Choose verification documents'}</Text>
+          </Pressable>
+          <Text style={styles.helper}>PDF, JPEG or PNG · up to 5 documents, 10 MB each. They are only sent when you submit your application.</Text>
+
+          <View style={styles.rule} />
+          <Text style={styles.sectionTitle}>Step 3 · Produce photo</Text>
+          <Text style={styles.muted}>Show the admin and buyers what you sell. Once your application is approved, this photo goes live in the market.</Text>
+          {producePicker}
+
+          <View style={styles.rule} />
+          <Text style={styles.sectionTitle}>Submit your application</Text>
+          <Text style={styles.muted}>Your business details, documents and photo are sent to the admin together, as one application.</Text>
+          <View style={styles.checklist}>
+            {applicationChecklist.map((item) => (
+              <Text key={item.label} style={[styles.checkItem, item.done && styles.checkItemDone]}>{item.done ? '✓' : '○'}  {item.label}</Text>
+            ))}
+          </View>
+          <Pressable accessibilityRole="button" disabled={!applicationReady || submittingApplication} onPress={() => void submitApplication()} style={[styles.primaryButton, (!applicationReady || submittingApplication) && styles.disabled]}>
+            <Text style={styles.primaryText}>{submittingApplication ? 'Submitting application…' : applicationStatus === 'rejected' ? 'Submit application again' : 'Submit application'}</Text>
+          </Pressable>
+        </>
+      ) : null}
+
+      {applicationStatus === 'pending' && visibleListings.length > 0 ? (
+        <>
+          <View style={styles.rule} />
+          <Text style={styles.sectionTitle}>Sent with your application</Text>
+          {photoGrid(false)}
+        </>
+      ) : null}
+
+      {approved ? (
+        <>
+          <View style={styles.rule} />
+          <Text style={styles.sectionTitle}>Your produce photos</Text>
+          <Text style={styles.muted}>Add more photos of what you sell. Each new photo is checked by the admin, then shown to buyers under that produce.</Text>
+          {visibleListings.length === 0 ? <Text style={styles.helper}>No photos yet. Add your first one below.</Text> : photoGrid(true)}
+          {producePicker}
+          <Pressable accessibilityRole="button" disabled={busy || !produceTypeId || !listingPhotoDraft} onPress={() => void addProducePhoto()} style={[styles.primaryButton, (busy || !produceTypeId || !listingPhotoDraft) && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Uploading…' : 'Add photo'}</Text></Pressable>
+        </>
+      ) : null}
+
+      <Link href="/enquiries" style={styles.linkText}>Open seller enquiry inbox</Link>
+      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+      {notice ? <Text accessibilityRole="status" style={styles.success}>{notice}</Text> : null}
+    </View>
+  );
+
+  function photoGrid(editable: boolean) {
+    return (
         <View style={styles.photoGrid}>
           {visibleListings.map((listing) => {
             const slug = categories.find((item) => item.id === listing.categoryId)?.slug ?? '';
@@ -358,48 +511,16 @@ function SellerDashboard({ user }: { user: SessionUser }) {
                 )}
                 <Text style={styles.listItemTitle} numberOfLines={1}>{listing.title}</Text>
                 <Text style={[styles.photoStatus, { color: status.color }]}>{status.label}</Text>
-                <View style={styles.listingActions}>
+                {editable ? <View style={styles.listingActions}>
                   {listing.status === 'draft' || listing.status === 'rejected' ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => submitListing(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Send for review</Text></Pressable> : null}
                   <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${listing.title} photo`} disabled={busy} onPress={() => removeProducePhoto(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Remove</Text></Pressable>
-                </View>
+                </View> : null}
               </View>
             );
           })}
         </View>
-      )}
-
-      <Text style={styles.fieldLabel}>1. Category</Text>
-      <View style={styles.choiceWrap}>{categories.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: categoryId === item.id }} onPress={() => { setCategoryId(item.id); setProduceTypeId(''); }} style={[styles.choice, categoryId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, categoryId === item.id && styles.choiceTextActive]}>{categoryIcon(item.slug)} {item.name}</Text></Pressable>)}</View>
-      <Text style={styles.fieldLabel}>2. What is it?</Text>
-      <View style={styles.choiceWrap}>{produceTypes.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: produceTypeId === item.id }} onPress={() => setProduceTypeId(item.id)} style={[styles.choice, produceTypeId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, produceTypeId === item.id && styles.choiceTextActive]}>{produceIcon(item.name, selectedCategorySlug)} {item.name}</Text></Pressable>)}</View>
-      {produceTypes.length === 0 ? <Text style={styles.helper}>{produceTypesLoading ? 'Loading produce types…' : 'No produce types are available for this category yet.'}</Text> : null}
-      <Text style={styles.fieldLabel}>3. Photo</Text>
-      {listingPhotoDraft ? <View style={styles.photoPreview}>
-        <Image accessibilityLabel="Selected produce photo preview" source={{ uri: listingPhotoDraft.uri }} contentFit="cover" style={styles.photoPreviewImage} />
-        <View style={styles.photoPreviewFields}>
-          <Text style={styles.muted} numberOfLines={1}>{listingPhotoDraft.name}</Text>
-          <Pressable accessibilityRole="button" onPress={() => setListingPhotoDraft(null)} style={styles.smallButton}><Text style={styles.smallButtonText}>Choose a different photo</Text></Pressable>
-        </View>
-      </View> : <Pressable accessibilityRole="button" disabled={busy} onPress={() => void chooseNewListingPhoto()} style={styles.secondaryButton}><Text style={styles.secondaryText}>Choose photo</Text></Pressable>}
-      <Text style={styles.helper}>JPEG, PNG or WebP. A clear, well-lit photo helps buyers.</Text>
-      <Text style={styles.fieldLabel}>Short note for buyers (optional)</Text>
-      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes in 10 kg boxes, harvested every week" placeholderTextColor="#7a877f" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
-      <Pressable accessibilityRole="button" disabled={busy || !business || !produceTypeId || !listingPhotoDraft} onPress={() => void addProducePhoto()} style={[styles.primaryButton, (busy || !business || !produceTypeId || !listingPhotoDraft) && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Uploading…' : 'Add photo'}</Text></Pressable>
-      {!business ? <Text style={styles.helper}>Save your business profile above before adding produce photos.</Text> : null}
-
-      <View style={styles.rule} />
-      <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Verification</Text><Text style={styles.statusTag}>{formatStatus(verification?.verificationStatus ?? 'not_submitted')}</Text></View>
-      <Text style={styles.muted}>Documents are private and can only be reviewed by an authorized administrator. Uploads use the storage configured on the AgriMarket server.</Text>
-      {verification?.submissions.map((submission) => <View key={submission.id} style={styles.feedbackBox}><Text style={styles.listItemTitle}>{formatStatus(submission.status)} · {new Date(submission.submittedAt).toLocaleDateString()}</Text>{submission.sellerFeedback ? <Text style={styles.muted}>{submission.sellerFeedback}</Text> : null}</View>)}
-      {verification?.verificationStatus !== 'approved' && verification?.verificationStatus !== 'pending' && <Pressable accessibilityRole="button" disabled={uploadingDocuments || !business} onPress={chooseDocuments} style={[styles.secondaryButton, (!business || uploadingDocuments) && styles.disabled]}><Text style={styles.secondaryText}>{uploadingDocuments ? 'Uploading documents…' : 'Choose verification documents'}</Text></Pressable>}
-      {verification?.verificationStatus === 'pending' ? <Text style={styles.helper}>Your documents are with the admin for review. You can upload new ones if they ask for changes.</Text> : null}
-      {!business ? <Text style={styles.helper}>Save your business profile above before uploading verification documents.</Text> : null}
-      <Text style={styles.helper}>PDF, JPEG, or PNG · maximum 5 documents, 10 MB each</Text>
-      <Link href="/enquiries" style={styles.linkText}>Open seller enquiry inbox</Link>
-      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-      {notice ? <Text accessibilityRole="status" style={styles.success}>{notice}</Text> : null}
-    </View>
-  );
+    );
+  }
 }
 
 function ProvincePicker({ selected, onSelect }: { selected: string; onSelect: (value: string) => void }) {
@@ -431,6 +552,18 @@ const styles = StyleSheet.create({
   input: { minHeight: 46, paddingHorizontal: 12, borderWidth: 1, borderColor: '#cbd5ca', borderRadius: 5, color: '#183f32', backgroundColor: '#fffefa' },
   multiline: { minHeight: 100, paddingTop: 12, textAlignVertical: 'top' },
   helper: { color: '#78867d', fontSize: 11, lineHeight: 17 },
+  banner: { gap: 6, padding: 16, borderRadius: 14, borderWidth: 1 },
+  bannerInfo: { borderColor: '#cfe0cf', backgroundColor: '#eaf3e6' },
+  bannerWaiting: { borderColor: '#ead9a6', backgroundColor: '#fbf4dd' },
+  bannerProblem: { borderColor: '#efc9bf', backgroundColor: '#fbeae5' },
+  bannerSuccess: { borderColor: '#bcdcc4', backgroundColor: '#e3f2e6' },
+  bannerTitle: { color: '#183f32', fontSize: 15, fontWeight: '800' },
+  bannerBody: { color: '#3f5147', fontSize: 13, lineHeight: 19 },
+  documentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e3e8de', backgroundColor: '#fbfcf9' },
+  documentName: { flex: 1, color: '#183f32', fontSize: 13, fontWeight: '600' },
+  checklist: { gap: 6, padding: 14, borderRadius: 12, backgroundColor: '#f3f5ed' },
+  checkItem: { color: '#7a6a4f', fontSize: 13, lineHeight: 19 },
+  checkItemDone: { color: '#235946', fontWeight: '700' },
   photoPreview: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 6, backgroundColor: '#f3f5ed' },
   photoPreviewImage: { width: 92, height: 92, borderRadius: 4, backgroundColor: '#e4eadf' },
   photoPreviewFields: { flex: 1, gap: 7 },

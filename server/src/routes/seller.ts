@@ -4,19 +4,39 @@ import multer from 'multer';
 import { z } from 'zod';
 
 import type { Database } from '../db/client.js';
-import { businesses, categories, listingImages, listings, produceTypes, verificationSubmissions } from '../db/schema.js';
+import { auditLogs, businesses, categories, listingImages, listings, produceTypes, verificationSubmissions } from '../db/schema.js';
 import { searchLocations } from '../geocoding.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { normalizeSouthAfricanPhone } from '../policies.js';
+import { missingApplicationDetails, normalizeSouthAfricanPhone } from '../policies.js';
 import type { PrivateStorage, PublicImageStorage } from '../storage.js';
 import { businessSchema, listingCreateSchema, listingUpdateSchema } from '../validation.js';
 
-const documentUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+const MAX_LISTING_PHOTO_BYTES = 5 * 1024 * 1024;
+const listingImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_LISTING_PHOTO_BYTES, files: 5 } });
+// Up to 5 documents (10 MB each) plus one produce photo (5 MB, checked in the route).
+const applicationUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 6 } });
+
+const applicationFieldsSchema = z.object({
+  categoryId: z.uuid({ message: 'Choose a produce category.' }),
+  produceTypeId: z.uuid({ message: 'Choose what your produce is.' }),
+  note: z.string().trim().max(1000).optional(),
 });
-const listingImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 5 } });
+
+// Before approval, produce photos travel inside the seller application. Separate photos can
+// only be added once the admin has approved the business.
+async function requireApprovedBusiness(db: Database, ownerId: string) {
+  const [business] = await db
+    .select({ id: businesses.id, verificationStatus: businesses.verificationStatus })
+    .from(businesses)
+    .where(eq(businesses.ownerId, ownerId))
+    .limit(1);
+  if (!business) throw new HttpError(409, 'BUSINESS_REQUIRED', 'Create a business profile before adding a listing.');
+  if (business.verificationStatus !== 'approved') {
+    throw new HttpError(409, 'BUSINESS_NOT_APPROVED', 'Send your produce photo with your seller application. You can add more photos after the admin approves your business.');
+  }
+  return business;
+}
 
 export function createSellerRouter(
   db: Database,
@@ -137,12 +157,7 @@ export function createSellerRouter(
     '/listings',
     asyncRoute(async (request, response) => {
       const input = listingCreateSchema.parse(request.body);
-      const [business] = await db
-        .select({ id: businesses.id })
-        .from(businesses)
-        .where(eq(businesses.ownerId, request.auth!.id))
-        .limit(1);
-      if (!business) throw new HttpError(409, 'BUSINESS_REQUIRED', 'Create a business profile before adding a listing.');
+      const business = await requireApprovedBusiness(db, request.auth!.id);
       const [category] = await db
         .select({ id: categories.id })
         .from(categories)
@@ -222,12 +237,7 @@ export function createSellerRouter(
     '/listings/:listingId/submit',
     asyncRoute(async (request, response) => {
       const listingId = z.uuid().parse(request.params.listingId);
-      const [business] = await db
-        .select({ id: businesses.id })
-        .from(businesses)
-        .where(eq(businesses.ownerId, request.auth!.id))
-        .limit(1);
-      if (!business) throw new HttpError(404, 'NOT_FOUND', 'The listing was not found.');
+      const business = await requireApprovedBusiness(db, request.auth!.id);
       const [listing] = await db
         .update(listings)
         .set({ status: 'pending', updatedAt: new Date() })
@@ -280,12 +290,7 @@ export function createSellerRouter(
       if (!files.length || altTexts.length !== files.length) {
         throw new HttpError(400, 'IMAGES_REQUIRED', 'Provide one descriptive alt text for each selected image.');
       }
-      const [business] = await db
-        .select({ id: businesses.id })
-        .from(businesses)
-        .where(eq(businesses.ownerId, request.auth!.id))
-        .limit(1);
-      if (!business) throw new HttpError(404, 'NOT_FOUND', 'The listing was not found.');
+      const business = await requireApprovedBusiness(db, request.auth!.id);
       const [listing] = await db
         .select({ id: listings.id, status: listings.status })
         .from(listings)
@@ -344,29 +349,118 @@ export function createSellerRouter(
     }),
   );
 
+  // Documents used to be sent on their own. Applications must now be complete, so point older
+  // app versions to the new route instead of creating a documents-only submission.
   router.post(
     '/verification',
-    documentUpload.array('documents', 5),
+    asyncRoute(async () => {
+      throw new HttpError(409, 'APPLICATION_REQUIRED', 'Update the AgriMarket app, then send your business details, documents and a produce photo together with "Submit application".');
+    }),
+  );
+
+  // The whole seller application in one request: the saved business profile must be complete,
+  // plus 1–5 private verification documents and one produce photo. Everything is saved together
+  // and goes to the admin's verification queue as a single application.
+  router.post(
+    '/application',
+    applicationUpload.fields([{ name: 'documents', maxCount: 5 }, { name: 'photo', maxCount: 1 }]),
     asyncRoute(async (request, response) => {
-      const files = (request.files ?? []) as Express.Multer.File[];
-      if (files.length === 0) throw new HttpError(400, 'DOCUMENTS_REQUIRED', 'Choose at least one supporting document.');
+      const uploaded = (request.files ?? {}) as Record<string, Express.Multer.File[] | undefined>;
+      const documents = uploaded.documents ?? [];
+      const photo = uploaded.photo?.[0];
+      const fields = applicationFieldsSchema.parse(request.body);
+
       const [business] = await db
-        .select({ id: businesses.id, verificationStatus: businesses.verificationStatus })
+        .select({
+          id: businesses.id,
+          name: businesses.name,
+          description: businesses.description,
+          province: businesses.province,
+          town: businesses.town,
+          contactEmail: businesses.contactEmail,
+          contactPhone: businesses.contactPhone,
+          whatsappPhone: businesses.whatsappPhone,
+          verificationStatus: businesses.verificationStatus,
+        })
         .from(businesses)
         .where(eq(businesses.ownerId, request.auth!.id))
         .limit(1);
-      if (!business) throw new HttpError(409, 'BUSINESS_REQUIRED', 'Create a business profile before submitting documents.');
-      if (business.verificationStatus === 'pending' || business.verificationStatus === 'approved') {
-        throw new HttpError(409, 'SUBMISSION_NOT_ALLOWED', 'A pending or approved business cannot submit another verification request.');
+      if (!business) throw new HttpError(409, 'BUSINESS_REQUIRED', 'Save your business details before submitting your application.');
+      if (business.verificationStatus === 'pending') {
+        throw new HttpError(409, 'APPLICATION_PENDING', 'Your application is already with the admin. You will be notified when it has been reviewed.');
       }
+      if (business.verificationStatus === 'approved') {
+        throw new HttpError(409, 'ALREADY_APPROVED', 'Your business is already approved. Add more produce photos from your profile.');
+      }
+      const missing = missingApplicationDetails(business);
+      if (missing.length) {
+        throw new HttpError(400, 'APPLICATION_INCOMPLETE', `Complete your business details first: ${missing.join(', ')}.`);
+      }
+      if (documents.length === 0) throw new HttpError(400, 'DOCUMENTS_REQUIRED', 'Add at least one verification document, such as your CIPC registration certificate.');
+      if (!photo) throw new HttpError(400, 'PHOTO_REQUIRED', 'Add a photo of your produce.');
+      if (photo.size > MAX_LISTING_PHOTO_BYTES) throw new HttpError(413, 'FILE_TOO_LARGE', 'The produce photo must be 5 MB or smaller.');
 
+      const [choice] = await db
+        .select({ produceTypeName: produceTypes.name, categorySlug: categories.slug })
+        .from(produceTypes)
+        .innerJoin(categories, eq(produceTypes.categoryId, categories.id))
+        .where(and(
+          eq(produceTypes.id, fields.produceTypeId),
+          eq(produceTypes.categoryId, fields.categoryId),
+          eq(produceTypes.active, true),
+          eq(categories.isActive, true),
+        ))
+        .limit(1);
+      if (!choice) throw new HttpError(400, 'INVALID_PRODUCE_TYPE', 'Choose what your produce is from the list.');
+
+      const note = fields.note ?? '';
+      const place = business.town ? ` in ${business.town}` : '';
+      const listingInput = listingCreateSchema.parse({
+        categoryId: fields.categoryId,
+        produceTypeId: fields.produceTypeId,
+        title: choice.produceTypeName.length >= 3 ? choice.produceTypeName : `${choice.produceTypeName} produce`,
+        description: note.length >= 10 ? note : `${choice.produceTypeName} from ${business.name}${place}.${note ? ` ${note}` : ''}`,
+        province: business.province,
+        town: business.town,
+        type: choice.categorySlug === 'agricultural-services' ? 'service' : 'product',
+      });
+      const altText = `${choice.produceTypeName} from ${business.name}`.slice(0, 180);
+
+      // Store the files first; if anything later fails, remove them so nothing is left behind.
       const storedKeys: string[] = [];
+      let storedPhoto: Awaited<ReturnType<PublicImageStorage['storeListingImage']>> | null = null;
       try {
-        for (const file of files) {
+        for (const file of documents) {
           storedKeys.push(await storage.storeVerificationDocument({ buffer: file.buffer, size: file.size }));
         }
-        const submission = await db.transaction(async (transaction) => {
-          const [created] = await transaction
+        storedPhoto = await imageStorage.storeListingImage({ buffer: photo.buffer, size: photo.size });
+        const savedPhoto = storedPhoto;
+
+        const result = await db.transaction(async (transaction) => {
+          const [locked] = await transaction
+            .select({ verificationStatus: businesses.verificationStatus })
+            .from(businesses)
+            .where(eq(businesses.id, business.id))
+            .limit(1)
+            .for('update');
+          if (locked?.verificationStatus === 'pending' || locked?.verificationStatus === 'approved') {
+            throw new HttpError(409, 'APPLICATION_PENDING', 'Your application is already with the admin.');
+          }
+          const [listing] = await transaction
+            .insert(listings)
+            .values({ ...listingInput, businessId: business.id, status: 'pending' })
+            .returning({ id: listings.id, title: listings.title, status: listings.status });
+          await transaction.insert(listingImages).values({
+            listingId: listing!.id,
+            storageKey: savedPhoto.storageKey,
+            mimeType: savedPhoto.mimeType,
+            byteSize: savedPhoto.byteSize,
+            width: savedPhoto.width,
+            height: savedPhoto.height,
+            altText,
+            sortOrder: 0,
+          });
+          const [submission] = await transaction
             .insert(verificationSubmissions)
             .values({ businessId: business.id, submitterId: request.auth!.id, storageKeys: storedKeys, status: 'pending' })
             .returning({ id: verificationSubmissions.id, status: verificationSubmissions.status, submittedAt: verificationSubmissions.submittedAt });
@@ -374,11 +468,21 @@ export function createSellerRouter(
             .update(businesses)
             .set({ verificationStatus: 'pending', updatedAt: new Date() })
             .where(eq(businesses.id, business.id));
-          return created;
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'application.submitted',
+            targetType: 'verification_submission',
+            targetId: submission!.id,
+            metadata: { businessId: business.id, listingId: listing!.id, documentCount: storedKeys.length },
+          });
+          return { submission, listing };
         });
-        response.status(201).json({ data: { submission } });
+        response.status(201).json({ data: result });
       } catch (error) {
-        await Promise.all(storedKeys.map((key) => storage.removePrivateObject(key)));
+        await Promise.all([
+          ...storedKeys.map((key) => storage.removePrivateObject(key)),
+          ...(storedPhoto ? [imageStorage.removePublicImage(storedPhoto.storageKey)] : []),
+        ]);
         throw error;
       }
     }),

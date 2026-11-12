@@ -245,3 +245,20 @@ export const auditLogs = pgTable(
   },
   (table) => [index('audit_logs_target_created_idx').on(table.targetType, table.targetId, table.createdAt)],
 );
+// In-app notifications, e.g. "Your business was approved". Written in the same transaction
+// as the event that caused them; each user only ever reads their own.
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    // App route to open when the notification is tapped, e.g. /account or /enquiries.
+    link: text('link'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index('notifications_user_created_idx').on(table.userId, table.createdAt)],
+);

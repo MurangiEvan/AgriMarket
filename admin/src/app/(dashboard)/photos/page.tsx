@@ -80,7 +80,7 @@ export default function PhotosPage() {
                 </div>
                 {item.description ? <p style={{ fontSize: 14 }}>{item.description}</p> : null}
                 <p className="muted">Sent {formatDateTime(item.createdAt)}</p>
-                {!approvedBusiness ? <p className="alert info">Approve this business under Verifications before publishing its photos.</p> : null}
+                {!approvedBusiness ? <p className="alert info">Approve this business under Applications before publishing its photos.</p> : null}
                 <div className="row">
                   {approvedBusiness ? (
                     <button className="button primary small" type="button" disabled={busyId === item.id} onClick={() => moderate(item, 'published')}>Approve &amp; publish</button>

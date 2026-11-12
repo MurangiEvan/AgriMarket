@@ -118,6 +118,7 @@ export function AuthScreen({ registration = false }: { registration?: boolean })
               </>
             )}
           </View>
+          <Link href="/help" style={[styles.link, styles.helpLink]}>Need help? Visit Help & support</Link>
         </View>
       </ScrollView>
     </View>
@@ -147,4 +148,5 @@ const styles = StyleSheet.create({
   primaryText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   links: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 14, marginTop: 6 },
   link: { color: '#235946', fontWeight: '700', textDecorationLine: 'underline' },
+  helpLink: { alignSelf: 'center', marginTop: 4, fontSize: 13 },
 });

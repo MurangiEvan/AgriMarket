@@ -47,3 +47,6 @@ services:
         sync: false
       - key: EXPO_PUBLIC_ADMIN_URL
         sync: false
+      # Support inbox shown on the app's Help & support page ("Email support" button).
+      - key: EXPO_PUBLIC_SUPPORT_EMAIL
+        sync: false

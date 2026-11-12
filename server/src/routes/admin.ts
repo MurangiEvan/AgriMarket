@@ -1,10 +1,11 @@
-import { and, desc, eq, like, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, lt, ne, or, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 
 import type { Database } from '../db/client.js';
 import { auditLogs, businesses, listingImages, listings, users, verificationSubmissions } from '../db/schema.js';
 import { HttpError, asyncRoute } from '../http.js';
+import { listingNotification, notify, verificationNotification } from '../notifications.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import type { PrivateStorage } from '../storage.js';
 import { listingModerationSchema, verificationDecisionSchema } from '../validation.js';
@@ -52,7 +53,30 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
         .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(desc(verificationSubmissions.submittedAt))
         .limit(query.limit);
-      response.json({ data: rows });
+
+      // The produce photos that came with each application, so the admin reviews it as a whole.
+      const businessIds = [...new Set(rows.map((row) => row.businessId))];
+      const photoRows = businessIds.length
+        ? await db
+            .select({
+              businessId: listings.businessId,
+              listingId: listings.id,
+              title: listings.title,
+              description: listings.description,
+              status: listings.status,
+              imageId: sql<string | null>`(select ${listingImages.id} from ${listingImages} where ${listingImages.listingId} = ${listings.id} order by ${listingImages.sortOrder} limit 1)`,
+            })
+            .from(listings)
+            .where(and(inArray(listings.businessId, businessIds), inArray(listings.status, ['pending', 'published', 'rejected'])))
+            .orderBy(desc(listings.createdAt))
+        : [];
+      const photosByBusiness = new Map<string, Array<{ listingId: string; title: string; description: string; status: string; imageUrl: string | null }>>();
+      for (const { businessId, imageId, ...photo } of photoRows) {
+        const list = photosByBusiness.get(businessId) ?? [];
+        if (list.length < 5) list.push({ ...photo, imageUrl: imageId ? `/api/v1/media/listings/${imageId}` : null });
+        photosByBusiness.set(businessId, list);
+      }
+      response.json({ data: rows.map((row) => ({ ...row, photos: photosByBusiness.get(row.businessId) ?? [] })) });
     }),
   );
 
@@ -67,11 +91,17 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
 
       const result = await db.transaction(async (transaction) => {
         const [submission] = await transaction
-          .select({ id: verificationSubmissions.id, businessId: verificationSubmissions.businessId })
+          .select({
+            id: verificationSubmissions.id,
+            businessId: verificationSubmissions.businessId,
+            businessName: businesses.name,
+            ownerId: businesses.ownerId,
+          })
           .from(verificationSubmissions)
+          .innerJoin(businesses, eq(verificationSubmissions.businessId, businesses.id))
           .where(and(eq(verificationSubmissions.id, verificationId), eq(verificationSubmissions.status, 'pending')))
           .limit(1)
-          .for('update');
+          .for('update', { of: verificationSubmissions });
         if (!submission) throw new HttpError(409, 'DECISION_ALREADY_RECORDED', 'This verification submission is no longer pending.');
 
         const reviewedAt = new Date();
@@ -99,6 +129,25 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           targetId: submission.id,
           metadata: { businessId: submission.businessId },
         });
+
+        // The produce photo arrived inside the application and was reviewed with it: approving the
+        // application publishes it, rejecting the application rejects it (the seller resubmits both).
+        const applicationListings = await transaction
+          .update(listings)
+          .set({ status: input.decision === 'approved' ? 'published' : 'rejected', updatedAt: reviewedAt })
+          .where(and(eq(listings.businessId, submission.businessId), eq(listings.status, 'pending')))
+          .returning({ id: listings.id });
+        if (applicationListings.length) {
+          await transaction.insert(auditLogs).values(applicationListings.map((listing) => ({
+            actorId: request.auth!.id,
+            action: `listing.${input.decision === 'approved' ? 'published' : 'rejected'}`,
+            targetType: 'listing',
+            targetId: listing.id,
+            metadata: { businessId: submission.businessId, viaApplication: true },
+          })));
+        }
+
+        await notify(transaction, verificationNotification(submission.ownerId, submission.businessName, input.decision, input.sellerFeedback ?? null));
 
         return updated;
       });
@@ -155,7 +204,8 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
         })
         .from(listings)
         .innerJoin(businesses, eq(listings.businessId, businesses.id))
-        .where(eq(listings.status, 'pending'))
+        // Photos from businesses still under review are part of their application (Verifications).
+        .where(and(eq(listings.status, 'pending'), eq(businesses.verificationStatus, 'approved')))
         .orderBy(desc(listings.updatedAt))
         .limit(query.limit);
       response.json({
@@ -173,7 +223,7 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
       const listingId = z.uuid().parse(request.params.listingId);
       const input = listingModerationSchema.parse(request.body);
       const [target] = await db
-        .select({ businessId: businesses.id, verificationStatus: businesses.verificationStatus })
+        .select({ businessId: businesses.id, verificationStatus: businesses.verificationStatus, ownerId: businesses.ownerId, title: listings.title })
         .from(listings)
         .innerJoin(businesses, eq(listings.businessId, businesses.id))
         .where(eq(listings.id, listingId))
@@ -196,6 +246,8 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           targetId: listingId,
           metadata: { businessId: target.businessId },
         });
+        const notification = listingNotification(target.ownerId, target.title, input.status, input.reason);
+        if (notification) await notify(transaction, notification);
         return listing;
       });
       response.json({ data: { listing: updated } });
@@ -209,7 +261,13 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
       const [verificationRows, businessRows, listingRows, userRows] = await Promise.all([
         db.select({ status: verificationSubmissions.status, count }).from(verificationSubmissions).groupBy(verificationSubmissions.status),
         db.select({ status: businesses.verificationStatus, count }).from(businesses).groupBy(businesses.verificationStatus),
-        db.select({ status: listings.status, count }).from(listings).groupBy(listings.status),
+        // Pending photos inside an application are counted with the application, not as photos waiting.
+        db
+          .select({ status: listings.status, count })
+          .from(listings)
+          .innerJoin(businesses, eq(listings.businessId, businesses.id))
+          .where(or(ne(listings.status, 'pending'), eq(businesses.verificationStatus, 'approved')))
+          .groupBy(listings.status),
         db.select({ role: users.role, count }).from(users).where(eq(users.isActive, true)).groupBy(users.role),
       ]);
       const toRecord = <K extends string>(rows: { key: K; count: number }[]) =>

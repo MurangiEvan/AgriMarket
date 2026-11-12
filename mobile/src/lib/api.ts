@@ -1,4 +1,5 @@
 import { roundCoordinate } from './market-flow';
+import { unreachableMessage } from './network-errors';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -162,9 +163,7 @@ async function performRequest(path: string, init: RequestInit): Promise<Response
     if (controller?.signal.aborted) {
       throw new ApiError('The upload is taking too long. Check your internet connection and try again, or choose a smaller file.');
     }
-    throw new ApiError(
-      'AgriMarket could not reach the service. Check that your phone and computer are on the same Wi-Fi and that the API is running.',
-    );
+    throw new ApiError(unreachableMessage(upload, API_BASE_URL));
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -383,4 +382,30 @@ export async function signOut(): Promise<void> {
     accessToken = null;
     await clearNativeRefreshToken();
   }
+}
+export type AppNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export async function getNotifications(): Promise<{ items: AppNotification[]; unreadCount: number }> {
+  return apiRequest('/notifications?limit=50');
+}
+
+export async function getUnreadNotificationCount(): Promise<number> {
+  const result = await apiRequest<{ unreadCount: number }>('/notifications/unread-count');
+  return result.unreadCount;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await apiRequest(`/notifications/${id}/read`, { method: 'POST' });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await apiRequest('/notifications/read-all', { method: 'POST' });
 }

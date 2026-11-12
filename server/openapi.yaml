@@ -331,17 +331,34 @@ paths:
       responses:
         '200': { description: Safe submission status; no private storage keys }
     post:
-      summary: Submit private supporting documents
+      summary: Retired - documents can no longer be submitted on their own
+      deprecated: true
+      responses:
+        '409': { description: 'APPLICATION_REQUIRED: submit the whole application with POST /seller/application' }
+  /seller/application:
+    post:
+      summary: Submit the complete seller application (business details, documents and produce photo) in one request
+      description: >-
+        The saved business profile must be complete (name, a description of at least 10 characters, town, and
+        one contact method). The documents stay private; the photo becomes a pending listing that is published
+        when the admin approves the application, or rejected with it.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              required: [documents, photo, categoryId, produceTypeId]
               properties:
-                documents: { type: array, items: { type: string, format: binary }, maxItems: 5 }
+                documents: { type: array, items: { type: string, format: binary }, minItems: 1, maxItems: 5, description: 'PDF, JPEG or PNG, 10 MB each' }
+                photo: { type: string, format: binary, description: 'JPEG, PNG or WebP, 5 MB' }
+                categoryId: { type: string, format: uuid }
+                produceTypeId: { type: string, format: uuid }
+                note: { type: string, maxLength: 1000 }
       responses:
-        '201': { description: Verification submitted }
+        '201': { description: Application submitted (verification submission and pending listing) }
+        '400': { description: 'APPLICATION_INCOMPLETE, DOCUMENTS_REQUIRED, PHOTO_REQUIRED or INVALID_PRODUCE_TYPE' }
+        '409': { description: 'BUSINESS_REQUIRED, APPLICATION_PENDING or ALREADY_APPROVED' }
         '413': { description: File too large }
         '503': { description: Storage not configured }
   /enquiries:
@@ -419,6 +436,34 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
       responses:
         '200': { description: Audit events with minimal metadata, newest first }
+  /notifications:
+    get:
+      summary: List the signed-in user's notifications, newest first
+      description: Created for sellers when their verification is decided, a produce photo is published or rejected, or a buyer sends an enquiry.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50, default: 30 } }
+      responses:
+        '200': { description: 'items (id, type, title, body, link, readAt, createdAt) and unreadCount' }
+        '401': { description: Not signed in }
+  /notifications/unread-count:
+    get:
+      summary: Unread notification count for the bell badge
+      responses:
+        '200': { description: unreadCount }
+        '401': { description: Not signed in }
+  /notifications/{notificationId}/read:
+    post:
+      summary: Mark one of the user's own notifications as read
+      parameters:
+        - { name: notificationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Marked as read }
+        '404': { description: Not found or not owned by the user }
+  /notifications/read-all:
+    post:
+      summary: Mark all of the user's notifications as read
+      responses:
+        '204': { description: All marked as read }
   /admin/overview:
     get:
       summary: Read dashboard counts for administrators

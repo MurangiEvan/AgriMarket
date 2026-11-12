@@ -17,6 +17,13 @@ test('the emailed reset link opens whether or not the device is signed in', () =
   assert.equal(getAuthRedirect('signedIn', 'seller', 'reset-password'), null);
 });
 
+test('help and support opens for signed-out and signed-in users of every role', () => {
+  assert.equal(getAuthRedirect('signedOut', null, 'help'), null);
+  assert.equal(getAuthRedirect('signedIn', 'buyer', 'help'), null);
+  assert.equal(getAuthRedirect('signedIn', 'seller', 'help'), null);
+  assert.equal(getAuthRedirect('signedIn', 'admin', 'help'), null);
+});
+
 test('authenticated users are sent to their role home and cannot open role-restricted homes', () => {
   assert.equal(getAuthRedirect('signedIn', 'buyer', ''), '/market');
   assert.equal(getAuthRedirect('signedIn', 'seller', 'sign-in'), '/account');

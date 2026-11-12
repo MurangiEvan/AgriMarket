@@ -40,9 +40,9 @@ export default function OverviewPage() {
 
       <section aria-label="Waiting for review" className="stats">
         <Link href="/verifications" className={`stat ${pendingVerifications ? 'attention' : ''}`}>
-          <span>Verifications waiting</span>
+          <span>Applications waiting</span>
           <strong>{value(overview?.verifications.pending)}</strong>
-          <span>Review seller documents →</span>
+          <span>Review seller applications →</span>
         </Link>
         <Link href="/photos" className={`stat ${pendingPhotos ? 'attention' : ''}`}>
           <span>Produce photos waiting</span>

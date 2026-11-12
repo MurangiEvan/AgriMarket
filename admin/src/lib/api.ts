@@ -67,6 +67,7 @@ export function formatDateTime(value: string) {
 
 // Plain-language names for audit actions recorded by the API.
 export const auditActionLabels: Record<string, string> = {
+  'application.submitted': 'Seller application submitted',
   'verification.approved': 'Business approved',
   'verification.rejected': 'Business rejected',
   'verification.document.read': 'Verification document opened',

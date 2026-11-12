@@ -20,6 +20,7 @@ const PAGE_SIZE = 50;
 // Action filters match by prefix on the server, so "verification." covers every verification event.
 const actionOptions = [
   { value: '', label: 'All actions' },
+  { value: 'application.submitted', label: 'Application submitted' },
   { value: 'verification.', label: 'All verification events' },
   { value: 'verification.approved', label: 'Business approved' },
   { value: 'verification.rejected', label: 'Business rejected' },

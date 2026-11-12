@@ -21,6 +21,7 @@ import { createBuyerEnquiriesRouter, createSellerEnquiriesRouter } from './route
 import { createPublicImagesRouter } from './routes/images.js';
 import { createListingsRouter } from './routes/listings.js';
 import { createMarketRouter } from './routes/market.js';
+import { createNotificationsRouter } from './routes/notifications.js';
 import { createSellerRouter } from './routes/seller.js';
 import { createPrivateStorage, createPublicImageStorage } from './storage.js';
 
@@ -160,6 +161,7 @@ export function createApplication(
   app.use('/api/v1/enquiries', enquiryLimiter, createBuyerEnquiriesRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/seller/enquiries', createSellerEnquiriesRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/admin', createAdminRouter(db, storage, environment.SESSION_SECRET));
+  app.use('/api/v1/notifications', createNotificationsRouter(db, environment.SESSION_SECRET));
 
   if (environment.WEB_APP_DIR) {
     // Serve the exported Expo web app from the same origin as the API (single Render service).

@@ -1,9 +1,11 @@
 import { Link, usePathname } from 'expo-router';
-import { createContext, useContext, useState, type PropsWithChildren } from 'react';
+import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/back-button';
 import { useSession } from '@/components/session-provider';
+import { getUnreadNotificationCount } from '@/lib/api';
 
 type AppThemeValue = { isDark: boolean; toggleTheme: () => void };
 
@@ -26,6 +28,9 @@ const destinations = [
 export default function AppNavigation({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const colorScheme = useColorScheme();
+  // Android draws the app behind the status bar (clock, battery). Push the page and the
+  // floating top buttons below it; on the web this is 0.
+  const { top: statusBarHeight } = useSafeAreaInsets();
   const { user, loading, offline, error: sessionError, signOut } = useSession();
   const [themeOverride, setThemeOverride] = useState<boolean | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -35,28 +40,64 @@ export default function AppNavigation({ children }: PropsWithChildren) {
   // Every page except the role's home (and the landing page) gets a back button.
   const showBack = pathname !== home && pathname !== '/';
 
+  // Sellers get notifications (verification, photo and enquiry updates). The badge refreshes
+  // whenever the page changes and once a minute while the app is open.
+  const showBell = user?.role === 'seller';
+  const [unreadCount, setUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!showBell || offline) return;
+    let current = true;
+    const refresh = () => {
+      getUnreadNotificationCount()
+        .then((count) => { if (current) setUnreadCount(count); })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 60_000);
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [showBell, offline, pathname]);
+
   function toggleTheme() {
     setThemeOverride(!isDark);
   }
 
   return (
     <AppThemeContext.Provider value={{ isDark, toggleTheme }}>
-      <View style={styles.shell}>
+      <View style={[styles.shell, { paddingTop: statusBarHeight }]}>
         {offline ? <View accessibilityRole="alert" style={styles.offlineBanner}><Text style={styles.offlineText}>Offline — showing the last signed-in app shell. Changes are unavailable.</Text></View> : null}
         {sessionError ? <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorText}>{sessionError}</Text></View> : null}
         {showBack ? <View style={styles.backBar}><BackButton fallback={home} variant="floating" /></View> : null}
         <View style={styles.content}>{children}</View>
+        {showBell ? (
+          <Link href="/notifications" asChild>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+              style={StyleSheet.flatten([styles.bellButton, { top: statusBarHeight + 14 }])}
+            >
+              <Text style={styles.bellMark}>🔔</Text>
+              {unreadCount > 0 ? (
+                <View style={styles.badge} accessible={false}>
+                  <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </Link>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={actionsOpen ? 'Close app bar' : 'Open app bar'}
           accessibilityState={{ expanded: actionsOpen }}
           onPress={() => setActionsOpen((open) => !open)}
-          style={styles.menuButton}
+          style={[styles.menuButton, { top: statusBarHeight + 14 }]}
         >
           <Text style={styles.actionMark}>{actionsOpen ? '×' : '☰'}</Text>
         </Pressable>
         {actionsOpen && (
-          <View accessibilityRole="toolbar" accessibilityLabel="Appearance and account" style={StyleSheet.flatten([styles.actionPanel, isDark && styles.actionRailDark])}>
+          <View accessibilityRole="toolbar" accessibilityLabel="Appearance and account" style={StyleSheet.flatten([styles.actionPanel, { top: statusBarHeight + 66 }, isDark && styles.actionRailDark])}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -66,6 +107,17 @@ export default function AppNavigation({ children }: PropsWithChildren) {
               <Text style={styles.actionMark}>{isDark ? '☀' : '☾'}</Text>
               <Text style={StyleSheet.flatten([styles.actionText, isDark && styles.actionTextDark])}>{isDark ? 'Light mode' : 'Dark mode'}</Text>
             </Pressable>
+            <Link href="/help" asChild>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Help and support"
+                onPress={() => setActionsOpen(false)}
+                style={StyleSheet.flatten([styles.actionButton, isDark && styles.actionButtonDark])}
+              >
+                <Text style={styles.actionMark}>?</Text>
+                <Text style={StyleSheet.flatten([styles.actionText, isDark && styles.actionTextDark])}>Help & support</Text>
+              </Pressable>
+            </Link>
             {loading ? (
               <View style={styles.actionButton}>
                 <Text style={styles.actionMark}>…</Text>
@@ -124,7 +176,11 @@ const styles = StyleSheet.create({
   shell: { flex: 1, minHeight: '100%', backgroundColor: '#f3f5ed' },
   // Pages scroll behind the floating menu; each page pads its own bottom so nothing is hidden.
   content: { flex: 1 },
-  backBar: { paddingTop: 14, paddingLeft: 12, paddingRight: 68, paddingBottom: 2, alignItems: 'flex-start' },
+  backBar: { paddingTop: 14, paddingLeft: 12, paddingRight: 120, paddingBottom: 2, alignItems: 'flex-start' },
+  bellButton: { position: 'absolute' as never, top: 14, right: 64, zIndex: 21, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#d8ded4', borderRadius: 8, backgroundColor: 'rgba(248, 249, 244, 0.97)' },
+  bellMark: { fontSize: 19, lineHeight: 24 },
+  badge: { position: 'absolute' as never, top: -6, right: -6, minWidth: 20, height: 20, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 2, borderColor: '#f8f9f4', backgroundColor: '#c0392b' },
+  badgeText: { color: '#ffffff', fontSize: 10, fontWeight: '800', lineHeight: 13 },
   offlineBanner: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#f4e3b2' },
   offlineText: { color: '#3e3217', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   errorBanner: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#f7dede' },

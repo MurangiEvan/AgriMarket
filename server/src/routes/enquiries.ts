@@ -6,6 +6,7 @@ import type { Database } from '../db/client.js';
 import { businesses, enquiries, listings, users } from '../db/schema.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { enquiryNotification, notify } from '../notifications.js';
 import { canTransitionEnquiry } from '../policies.js';
 import { enquiryCreateSchema, enquiryStatusSchema } from '../validation.js';
 
@@ -32,7 +33,7 @@ export function createBuyerEnquiriesRouter(db: Database, sessionSecret: string):
       }
 
       const [listing] = await db
-        .select({ id: listings.id, businessId: businesses.id })
+        .select({ id: listings.id, businessId: businesses.id, title: listings.title, ownerId: businesses.ownerId })
         .from(listings)
         .innerJoin(businesses, eq(listings.businessId, businesses.id))
         .where(
@@ -48,17 +49,23 @@ export function createBuyerEnquiriesRouter(db: Database, sessionSecret: string):
         .limit(1);
       if (!listing) throw new HttpError(404, 'NOT_FOUND', 'The requested listing was not found.');
 
-      const [created] = await db
-        .insert(enquiries)
-        .values({
-          buyerId: request.auth!.id,
-          businessId: listing.businessId,
-          listingId: listing.id,
-          message: input.message,
-          idempotencyKey,
-        })
-        .onConflictDoNothing({ target: [enquiries.buyerId, enquiries.idempotencyKey] })
-        .returning();
+      // The enquiry and the seller's notification are saved together. A retried submission
+      // (same idempotency key) inserts nothing, so the seller is not notified twice.
+      const created = await db.transaction(async (transaction) => {
+        const [inserted] = await transaction
+          .insert(enquiries)
+          .values({
+            buyerId: request.auth!.id,
+            businessId: listing.businessId,
+            listingId: listing.id,
+            message: input.message,
+            idempotencyKey,
+          })
+          .onConflictDoNothing({ target: [enquiries.buyerId, enquiries.idempotencyKey] })
+          .returning();
+        if (inserted) await notify(transaction, enquiryNotification(listing.ownerId, listing.title, input.message));
+        return inserted;
+      });
       if (created) {
         response.status(201).json({ data: { enquiry: created } });
         return;

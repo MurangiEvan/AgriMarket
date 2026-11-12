@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { hashSessionToken } from './middleware/auth.js';
 import { registrationSchema } from './validation.js';
-import { canTransitionEnquiry, normalizeSouthAfricanPhone, assertPublishedForDiscovery } from './policies.js';
+import { canTransitionEnquiry, missingApplicationDetails, normalizeSouthAfricanPhone, assertPublishedForDiscovery } from './policies.js';
 
 test('public registration cannot assign the administrator role', () => {
   assert.equal(
@@ -38,4 +38,12 @@ test('session hashes are keyed by the server secret', () => {
   const token = 'opaque-random-session-token';
   assert.equal(hashSessionToken(token, 'secret-one'), hashSessionToken(token, 'secret-one'));
   assert.notEqual(hashSessionToken(token, 'secret-one'), hashSessionToken(token, 'secret-two'));
+});
+test('a seller application needs a complete business profile before it reaches the admin', () => {
+  const complete = { name: 'Thabo Tomatoes', description: 'Family farm growing tomatoes.', town: 'Tzaneen', contactEmail: null, contactPhone: '+27821234567', whatsappPhone: null };
+  assert.deepEqual(missingApplicationDetails(complete), []);
+  assert.deepEqual(missingApplicationDetails({ ...complete, description: 'Farm' }), ['a business description (at least 10 characters)']);
+  assert.deepEqual(missingApplicationDetails({ ...complete, town: '  ' }), ['town or area']);
+  assert.deepEqual(missingApplicationDetails({ ...complete, contactPhone: null }), ['a contact email, mobile number or WhatsApp number']);
+  assert.deepEqual(missingApplicationDetails({ ...complete, contactPhone: null, whatsappPhone: '+27821234567' }), []);
 });

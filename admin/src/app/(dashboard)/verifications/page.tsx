@@ -16,6 +16,7 @@ type Verification = {
   businessName: string;
   province: string;
   ownerEmail: string;
+  photos: { listingId: string; title: string; description: string; status: string; imageUrl: string | null }[];
 };
 
 const tabs: { value: Status; label: string }[] = [
@@ -59,7 +60,7 @@ export default function VerificationsPage() {
       setError(`Write feedback for ${item.businessName} before rejecting, so the seller knows what to fix.`);
       return;
     }
-    if (decision === 'rejected' && !window.confirm(`Reject ${item.businessName}? The seller will see your feedback.`)) return;
+    if (decision === 'rejected' && !window.confirm(`Reject the application from ${item.businessName}? The seller will see your feedback and must send the whole application again.`)) return;
     setBusyId(item.id);
     setError('');
     setNotice('');
@@ -68,7 +69,7 @@ export default function VerificationsPage() {
         method: 'POST',
         body: JSON.stringify({ decision, sellerFeedback: sellerFeedback || null, internalReason: null }),
       });
-      setNotice(decision === 'approved' ? `${item.businessName} is approved. Their photos can now be published.` : `${item.businessName} was rejected and the seller can see your feedback.`);
+      setNotice(decision === 'approved' ? `${item.businessName} is approved and their produce photo is now live for buyers.` : `${item.businessName} was rejected and the seller can see your feedback.`);
       await Promise.all([load(status), refreshOverview()]);
     } catch (cause) {
       setError(errorMessage(cause, 'The decision could not be recorded.'));
@@ -81,8 +82,8 @@ export default function VerificationsPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <h1>Seller verifications</h1>
-          <p>Open each document, then approve the business or reject it with feedback. Every action is recorded in the audit log.</p>
+          <h1>Seller applications</h1>
+          <p>Each application has the business details, verification documents and a produce photo. Check them together, then approve or reject with feedback. Every action is recorded in the audit log.</p>
         </div>
       </header>
 
@@ -123,6 +124,25 @@ export default function VerificationsPage() {
             <p className="muted">Documents are private. Opening one is recorded in the audit log.</p>
           </div>
 
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="label">Produce photo ({item.photos.length})</span>
+            {item.photos.length === 0 ? <p className="muted">No produce photo came with this application.</p> : null}
+            <div className="row" style={{ alignItems: 'flex-start' }}>
+              {item.photos.map((photo) => (
+                <figure key={photo.listingId} style={{ margin: 0, width: 220, display: 'grid', gap: 6 }}>
+                  {photo.imageUrl
+                    ? <img className="photo" style={{ borderRadius: 10 }} src={photo.imageUrl} alt={`${photo.title} from ${item.businessName}`} loading="lazy" />
+                    : <div className="photo photo-missing" style={{ borderRadius: 10 }}>No photo</div>}
+                  <figcaption style={{ fontSize: 13 }}>
+                    <strong>{photo.title}</strong>
+                    {item.status !== 'pending' ? <> · <span className={`pill ${photo.status}`}>{photo.status === 'published' ? 'Live' : photo.status}</span></> : null}
+                    <br /><span className="muted">{photo.description}</span>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </div>
+
           {item.status === 'pending' ? (
             <>
               <div className="field">
@@ -136,9 +156,10 @@ export default function VerificationsPage() {
                 />
               </div>
               <div className="row">
-                <button className="button primary" type="button" disabled={busyId === item.id} onClick={() => decide(item, 'approved')}>Approve business</button>
-                <button className="button danger" type="button" disabled={busyId === item.id} onClick={() => decide(item, 'rejected')}>Reject</button>
+                <button className="button primary" type="button" disabled={busyId === item.id} onClick={() => decide(item, 'approved')}>Approve application</button>
+                <button className="button danger" type="button" disabled={busyId === item.id} onClick={() => decide(item, 'rejected')}>Reject application</button>
               </div>
+              <p className="muted">Approving verifies the business and publishes its produce photo to buyers. Rejecting sends everything back to the seller with your feedback.</p>
             </>
           ) : item.sellerFeedback ? (
             <p><span className="label">Feedback sent: </span>{item.sellerFeedback}</p>

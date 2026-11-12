@@ -4,8 +4,9 @@ export type AuthRole = 'buyer' | 'seller' | 'admin';
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 
 const publicRoutes = new Set(['sign-in', 'sign-up', 'forgot-password']);
-// Opened from an emailed link, so it must work whether or not this device is signed in.
-const anyStatusRoutes = new Set(['reset-password']);
+// reset-password is opened from an emailed link, and help must reach people who cannot sign in,
+// so both work whether or not this device is signed in.
+const anyStatusRoutes = new Set(['reset-password', 'help']);
 
 export function getAuthRedirect(status: AuthStatus, role: AuthRole | null, route: string): Href | null {
   if (status === 'loading') return null;

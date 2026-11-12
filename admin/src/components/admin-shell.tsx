@@ -32,7 +32,7 @@ export function useAdmin() {
 
 const navigation = [
   { href: '/', label: 'Overview', badge: null },
-  { href: '/verifications', label: 'Verifications', badge: 'verifications' },
+  { href: '/verifications', label: 'Applications', badge: 'verifications' },
   { href: '/photos', label: 'Produce photos', badge: 'photos' },
   { href: '/audit', label: 'Audit log', badge: null },
 ] as const;
