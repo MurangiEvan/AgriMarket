@@ -37,6 +37,7 @@ Browser authentication uses opaque server-side sessions in HttpOnly cookies. Tok
 | POST | `/admin/verifications/:id/decision` | Admin | Approve/reject and audit decision |
 | GET | `/admin/verifications/:id/documents/:index` | Admin | Read one private document with no-store headers and access audit |
 | PATCH | `/admin/listings/:id/moderation` | Admin | Moderate listing and audit action |
-| GET | `/admin/audit-logs` | Admin | Restricted audit access |
+| GET | `/admin/audit-logs` | Admin | Restricted audit access; optional filters `action` (prefix, e.g. `verification.`), `targetType`, `before` (ISO timestamp, for older pages) and `limit` (1–100) |
+| GET | `/admin/overview` | Admin | Counts of verifications, businesses and listings by status, and active users by role |
 
 Exact request/response schemas, implementation status, and generated OpenAPI must stay aligned. Use `400` for validation, `401` for missing identity, `403` for denied role/ownership, `404` for absent or inaccessible resources where disclosure is unsafe, `409` for conflicts, `429` for rate limits, and safe `5xx` responses.

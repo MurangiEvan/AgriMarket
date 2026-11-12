@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, like, lt, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 
@@ -12,6 +12,15 @@ import { listingModerationSchema, verificationDecisionSchema } from '../validati
 const queueQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(25),
+});
+
+// Audit log filters: an action prefix (e.g. "verification." or "listing.published"),
+// an exact target type, and a "before" timestamp for loading older pages.
+const auditQuerySchema = z.object({
+  action: z.string().trim().min(1).max(60).regex(/^[a-z_.]+$/).optional(),
+  targetType: z.string().trim().min(1).max(40).regex(/^[a-z_]+$/).optional(),
+  before: z.coerce.date().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
 export function createAdminRouter(db: Database, storage: PrivateStorage, sessionSecret: string): Router {
@@ -194,9 +203,37 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
   );
 
   router.get(
+    '/overview',
+    asyncRoute(async (_request, response) => {
+      const count = sql<number>`count(*)::int`;
+      const [verificationRows, businessRows, listingRows, userRows] = await Promise.all([
+        db.select({ status: verificationSubmissions.status, count }).from(verificationSubmissions).groupBy(verificationSubmissions.status),
+        db.select({ status: businesses.verificationStatus, count }).from(businesses).groupBy(businesses.verificationStatus),
+        db.select({ status: listings.status, count }).from(listings).groupBy(listings.status),
+        db.select({ role: users.role, count }).from(users).where(eq(users.isActive, true)).groupBy(users.role),
+      ]);
+      const toRecord = <K extends string>(rows: { key: K; count: number }[]) =>
+        Object.fromEntries(rows.map((row) => [row.key, row.count])) as Partial<Record<K, number>>;
+      response.json({
+        data: {
+          verifications: toRecord(verificationRows.map((row) => ({ key: row.status, count: row.count }))),
+          businesses: toRecord(businessRows.map((row) => ({ key: row.status, count: row.count }))),
+          listings: toRecord(listingRows.map((row) => ({ key: row.status, count: row.count }))),
+          users: toRecord(userRows.map((row) => ({ key: row.role, count: row.count }))),
+        },
+      });
+    }),
+  );
+
+  router.get(
     '/audit-logs',
     asyncRoute(async (request, response) => {
-      const query = queueQuerySchema.pick({ limit: true }).parse(request.query);
+      const query = auditQuerySchema.parse(request.query);
+      const conditions = [
+        query.action ? like(auditLogs.action, `${query.action.replace(/[%_\\]/g, '\\$&')}%`) : undefined,
+        query.targetType ? eq(auditLogs.targetType, query.targetType) : undefined,
+        query.before ? lt(auditLogs.createdAt, query.before) : undefined,
+      ].filter((condition) => condition !== undefined);
       const rows = await db
         .select({
           id: auditLogs.id,
@@ -208,6 +245,7 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           createdAt: auditLogs.createdAt,
         })
         .from(auditLogs)
+        .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(desc(auditLogs.createdAt))
         .limit(query.limit);
       response.json({ data: rows });

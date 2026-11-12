@@ -24,6 +24,17 @@ test('on Render the client origin and CORS allowlist default to the service URL'
   assert.equal(loadEnvironment({ ...validProduction, RENDER_EXTERNAL_URL: 'https://agrimarket.onrender.com' }).CLIENT_ORIGIN, 'https://agrimarket.example.test');
 });
 
+test('admin website origins are added to the CORS allowlist and must be HTTPS in production', () => {
+  const { CLIENT_ORIGIN: _client, CORS_ORIGINS: _cors, ...withoutOrigins } = validProduction;
+  const onRender = { ...withoutOrigins, RENDER_EXTERNAL_URL: 'https://agrimarket.onrender.com' };
+  const environment = loadEnvironment({ ...onRender, ADMIN_ORIGINS: 'https://agrimarket-admin.vercel.app/' });
+  assert.equal(environment.CORS_ORIGINS, 'https://agrimarket.onrender.com,https://agrimarket-admin.vercel.app');
+  assert.equal(environment.CLIENT_ORIGIN, 'https://agrimarket.onrender.com');
+  assert.throws(() => loadEnvironment({ ...onRender, ADMIN_ORIGINS: 'http://agrimarket-admin.vercel.app' }));
+  assert.throws(() => loadEnvironment({ ...onRender, ADMIN_ORIGINS: 'https://localhost:3000' }));
+  assert.equal(loadEnvironment({ ...onRender }).CORS_ORIGINS, 'https://agrimarket.onrender.com');
+});
+
 test('Brevo email requires a sender and is mandatory in production', () => {
   assert.equal(loadEnvironment(validProduction).MAIL_FROM_NAME, 'AgriMarket');
   assert.throws(() => loadEnvironment({ ...validProduction, BREVO_API_KEY: undefined }));

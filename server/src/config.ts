@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+const DEFAULT_CORS_ORIGINS = 'http://localhost:8081,http://localhost:19006';
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -11,7 +13,9 @@ const environmentSchema = z.object({
   CLOUDINARY_API_KEY: z.string().trim().min(1).optional(),
   CLOUDINARY_API_SECRET: z.string().trim().min(1).optional(),
   COOKIE_SECURE: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
-  CORS_ORIGINS: z.string().default('http://localhost:8081,http://localhost:19006'),
+  CORS_ORIGINS: z.string().default(DEFAULT_CORS_ORIGINS),
+  // Comma-separated origins of separately hosted frontends, e.g. the admin website on Vercel.
+  ADMIN_ORIGINS: z.string().optional(),
   CLIENT_ORIGIN: z.string().url().default('http://localhost:8081'),
   UPLOAD_STORAGE_DRIVER: z.enum(['local', 'cloudinary', 'disabled']).default('local'),
   LOCAL_PRIVATE_UPLOAD_DIR: z.string().default('./var/private-uploads'),
@@ -72,9 +76,19 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
   // client origin and CORS allowlist to it instead of requiring them to be typed in.
   const renderUrl = source.RENDER_EXTERNAL_URL?.replace(/\/$/, '');
   const clientOrigin = source.CLIENT_ORIGIN || renderUrl;
+  const baseOrigins = source.CORS_ORIGINS || (renderUrl ? clientOrigin : undefined);
+  // Separately hosted frontends (the admin website on Vercel) join the CORS allowlist,
+  // so they get the same production checks: exact, non-local HTTPS origins.
+  const adminOrigins = (source.ADMIN_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  const corsOrigins = adminOrigins.length
+    ? [...new Set([...(baseOrigins ?? DEFAULT_CORS_ORIGINS).split(','), ...adminOrigins])].join(',')
+    : baseOrigins;
   return environmentSchema.parse({
     ...source,
     CLIENT_ORIGIN: clientOrigin,
-    CORS_ORIGINS: source.CORS_ORIGINS || (renderUrl ? clientOrigin : undefined),
+    CORS_ORIGINS: corsOrigins,
   });
 }

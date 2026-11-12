@@ -41,3 +41,9 @@ services:
         sync: false
       - key: MAIL_FROM_EMAIL
         sync: false
+      # The admin website on Vercel (e.g. https://agrimarket-admin.vercel.app). ADMIN_ORIGINS lets
+      # the API accept its requests; EXPO_PUBLIC_ADMIN_URL is the link shown to admins in the app.
+      - key: ADMIN_ORIGINS
+        sync: false
+      - key: EXPO_PUBLIC_ADMIN_URL
+        sync: false

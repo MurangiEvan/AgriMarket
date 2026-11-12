@@ -412,8 +412,20 @@ paths:
   /admin/audit-logs:
     get:
       summary: Read recent restricted audit events
+      parameters:
+        - { name: action, in: query, required: false, schema: { type: string, pattern: '^[a-z_.]+$', maxLength: 60 }, description: Action prefix, e.g. verification. or listing.published }
+        - { name: targetType, in: query, required: false, schema: { type: string, pattern: '^[a-z_]+$', maxLength: 40 } }
+        - { name: before, in: query, required: false, schema: { type: string, format: date-time }, description: Only events created before this time (for loading older pages) }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
       responses:
-        '200': { description: Audit events with minimal metadata }
+        '200': { description: Audit events with minimal metadata, newest first }
+  /admin/overview:
+    get:
+      summary: Read dashboard counts for administrators
+      responses:
+        '200': { description: 'Counts keyed by status: verifications, businesses, listings, and active users by role' }
+        '401': { description: Not signed in }
+        '403': { description: Not an administrator }
 components:
   securitySchemes:
     accessCookie:
