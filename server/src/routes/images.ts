@@ -51,6 +51,10 @@ export function createPublicImagesRouter(db: Database, storage: PublicImageStora
         'Cache-Control': isPublic ? 'public, max-age=604800, immutable' : 'private, no-store',
         'Content-Type': image.mimeType,
         'X-Content-Type-Options': 'nosniff',
+        // Helmet's default (same-origin) blocks these photos whenever the app and the API run on
+        // different ports, e.g. the web app on localhost:8081 and the API on localhost:4000.
+        // same-site still stops other websites from embedding them.
+        'Cross-Origin-Resource-Policy': 'same-site',
       });
       response.send(content.buffer);
     }),
