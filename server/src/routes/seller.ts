@@ -259,6 +259,80 @@ export function createSellerRouter(
     }),
   );
 
+  // Swap a listing's photo for a new one. Every new photo is checked by the admin, so the listing
+  // goes back to "pending" (hidden from buyers) until it is approved again. While an application
+  // is still under review, the seller may swap its photo; it simply stays pending.
+  router.post(
+    '/listings/:listingId/photo',
+    listingImageUpload.single('photo'),
+    asyncRoute(async (request, response) => {
+      const listingId = z.uuid().parse(request.params.listingId);
+      const file = request.file;
+      if (!file) throw new HttpError(400, 'PHOTO_REQUIRED', 'Choose the new photo.');
+      const [owned] = await db
+        .select({
+          id: listings.id,
+          title: listings.title,
+          status: listings.status,
+          businessId: businesses.id,
+          businessName: businesses.name,
+          verificationStatus: businesses.verificationStatus,
+        })
+        .from(listings)
+        .innerJoin(businesses, eq(listings.businessId, businesses.id))
+        .where(and(eq(listings.id, listingId), eq(businesses.ownerId, request.auth!.id)))
+        .limit(1);
+      if (!owned || owned.status === 'archived') throw new HttpError(404, 'NOT_FOUND', 'The listing was not found.');
+      if (owned.verificationStatus !== 'approved' && owned.verificationStatus !== 'pending') {
+        throw new HttpError(409, 'APPLICATION_REQUIRED', 'Send a new photo with your seller application instead.');
+      }
+
+      const stored = await imageStorage.storeListingImage({ buffer: file.buffer, size: file.size });
+      try {
+        const result = await db.transaction(async (transaction) => {
+          const previous = await transaction
+            .delete(listingImages)
+            .where(eq(listingImages.listingId, listingId))
+            .returning({ storageKey: listingImages.storageKey, altText: listingImages.altText });
+          const [image] = await transaction
+            .insert(listingImages)
+            .values({
+              listingId,
+              storageKey: stored.storageKey,
+              mimeType: stored.mimeType,
+              byteSize: stored.byteSize,
+              width: stored.width,
+              height: stored.height,
+              altText: previous[0]?.altText ?? `${owned.title} from ${owned.businessName}`.slice(0, 180),
+              sortOrder: 0,
+            })
+            .returning({ id: listingImages.id, altText: listingImages.altText });
+          const [listing] = await transaction
+            .update(listings)
+            .set({ status: 'pending', updatedAt: new Date() })
+            .where(eq(listings.id, listingId))
+            .returning({ id: listings.id, status: listings.status });
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'listing.photo_replaced',
+            targetType: 'listing',
+            targetId: listingId,
+            metadata: { businessId: owned.businessId, previousStatus: owned.status, replacedPhotos: previous.length },
+          });
+          return { listing, image, previousKeys: previous.map((row) => row.storageKey) };
+        });
+        // Old files are removed only after the database points at the new photo.
+        await Promise.all(result.previousKeys.map((key) => imageStorage.removePublicImage(key).catch(() => undefined)));
+        response.status(201).json({
+          data: { listing: result.listing, image: { ...result.image, url: `/api/v1/media/listings/${result.image!.id}` } },
+        });
+      } catch (error) {
+        await imageStorage.removePublicImage(stored.storageKey).catch(() => undefined);
+        throw error;
+      }
+    }),
+  );
+
   router.post(
     '/listings/:listingId/archive',
     asyncRoute(async (request, response) => {

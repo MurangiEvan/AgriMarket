@@ -28,6 +28,7 @@ const actionOptions = [
   { value: 'listing.', label: 'All photo and listing events' },
   { value: 'listing.published', label: 'Photo published' },
   { value: 'listing.rejected', label: 'Photo rejected' },
+  { value: 'listing.photo_replaced', label: 'Photo replaced' },
   { value: 'export.', label: 'Data exports' },
   { value: 'user.', label: 'All account events' },
   { value: 'user.password_reset', label: 'Password reset' },

@@ -157,6 +157,7 @@ export function createApplication(
   app.use('/api/v1/media/listings', createPublicImagesRouter(db, imageStorage, environment.SESSION_SECRET));
   app.use('/api/v1/seller/verification', uploadLimiter);
   app.use('/api/v1/seller/listings/:listingId/images', uploadLimiter);
+  app.use('/api/v1/seller/listings/:listingId/photo', uploadLimiter);
   app.use('/api/v1/seller', createSellerRouter(db, storage, imageStorage, environment.SESSION_SECRET, environment.GOOGLE_MAPS_API_KEY));
   app.use('/api/v1/enquiries', enquiryLimiter, createBuyerEnquiriesRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/seller/enquiries', createSellerEnquiriesRouter(db, environment.SESSION_SECRET));

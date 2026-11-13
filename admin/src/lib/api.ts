@@ -74,6 +74,7 @@ export const auditActionLabels: Record<string, string> = {
   'listing.published': 'Photo approved and published',
   'listing.rejected': 'Photo rejected',
   'listing.archived': 'Listing archived',
+  'listing.photo_replaced': 'Photo replaced (back to review)',
   'user.password_reset': 'Password reset',
   'user.admin_bootstrap': 'Administrator account created',
   'export.businesses': 'Verified businesses exported (CSV)',

@@ -233,6 +233,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const [applicationDocuments, setApplicationDocuments] = useState<ListingPhotoDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [submittingApplication, setSubmittingApplication] = useState(false);
+  const [replacingId, setReplacingId] = useState('');
   const [uploadStage, setUploadStage] = useState('');
   // Optional: the seller says they are AgriSETA-supported; the admin confirms before a badge shows.
   const [agrisetaClaim, setAgrisetaClaim] = useState(false);
@@ -383,10 +384,11 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     await runAction(async () => { await apiRequest(`/seller/listings/${id}/archive`, { method: 'POST' }); }, 'Photo removed. Buyers will no longer see it.');
   }
 
-  async function chooseNewListingPhoto() {
+  // Opens the photo picker; on phones the photo is shrunk before it is handed back.
+  async function pickOnePhoto(onPicked: (photo: ListingPhotoDraft) => void) {
     if (Platform.OS === 'web') {
       pickWebFiles('image/jpeg,image/png,image/webp', false, ([file]) => {
-        if (file) setListingPhotoDraft({ uri: URL.createObjectURL(file), name: file.name, type: file.type || 'image/jpeg', file });
+        if (file) onPicked({ uri: URL.createObjectURL(file), name: file.name, type: file.type || 'image/jpeg', file });
       });
       return;
     }
@@ -395,10 +397,32 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] });
       const image = selection.canceled ? undefined : selection.assets[0];
       if (!image) return;
-      setListingPhotoDraft(await shrinkPhotoForUpload(image));
+      onPicked(await shrinkPhotoForUpload(image));
     } catch {
       setError('The photo library could not be opened. Check the app permissions and try again.');
     }
+  }
+
+  async function chooseNewListingPhoto() {
+    await pickOnePhoto(setListingPhotoDraft);
+  }
+
+  // Swaps the photo on one listing. The new photo goes back to the admin for review.
+  async function replacePhoto(listing: SellerListing) {
+    await pickOnePhoto((photo) => {
+      void runAction(async () => {
+        setReplacingId(listing.id);
+        await prepareForUpload();
+        await uploadWithRetry(`/seller/listings/${listing.id}/photo`, () => {
+          const form = new FormData();
+          if (photo.file) form.append('photo', photo.file, photo.name);
+          else appendNativeUpload(form, 'photo', { uri: photo.uri, name: photo.name, type: photo.type });
+          return form;
+        });
+      }, listing.status === 'published' && approved
+        ? `New ${listing.title} photo sent. The listing is hidden from buyers until the admin approves the new photo.`
+        : `New ${listing.title} photo sent to the admin for review.`, (value) => { setBusy(value); if (!value) setReplacingId(''); });
+    });
   }
 
 
@@ -622,10 +646,11 @@ function SellerDashboard({ user }: { user: SessionUser }) {
                 )}
                 <Text style={styles.listItemTitle} numberOfLines={1}>{listing.title}</Text>
                 <Text style={[styles.photoStatus, { color: status.color }]}>{status.label}</Text>
-                {editable ? <View style={styles.listingActions}>
-                  {listing.status === 'draft' || listing.status === 'rejected' ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => submitListing(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Send for review</Text></Pressable> : null}
-                  <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${listing.title} photo`} disabled={busy} onPress={() => removeProducePhoto(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Remove</Text></Pressable>
-                </View> : null}
+                <View style={styles.listingActions}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Replace ${listing.title} photo`} disabled={busy} onPress={() => void replacePhoto(listing)} style={styles.smallButton}><Text style={styles.smallButtonText}>{replacingId === listing.id ? 'Sending…' : 'Replace photo'}</Text></Pressable>
+                  {editable && (listing.status === 'draft' || listing.status === 'rejected') ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => submitListing(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Send for review</Text></Pressable> : null}
+                  {editable ? <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${listing.title} photo`} disabled={busy} onPress={() => removeProducePhoto(listing.id)} style={styles.smallButton}><Text style={styles.smallButtonText}>Remove</Text></Pressable> : null}
+                </View>
               </View>
             );
           })}
