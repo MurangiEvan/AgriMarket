@@ -33,13 +33,16 @@ export function ListingBrowser({ explore = false }: { explore?: boolean }) {
   const [category, setCategory] = useState(routeCategory);
   const [produceTypeId, setProduceTypeId] = useState(routeProduceTypeId);
   const [province, setProvince] = useState('');
+  // Only businesses an administrator has confirmed as AgriSETA-supported.
+  const [agrisetaOnly, setAgrisetaOnly] = useState(false);
+  const agriseta = agrisetaOnly ? ('true' as const) : undefined;
   const [loadingMore, setLoadingMore] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState('');
   const [requestError, setRequestError] = useState<{ key: string; message: string } | null>(null);
-  const requestKey = JSON.stringify([query, category, produceTypeId, province, retryCount]);
+  const requestKey = JSON.stringify([query, category, produceTypeId, province, agrisetaOnly, retryCount]);
   const loading = loadedKey !== requestKey;
   const error = requestError?.key === requestKey ? requestError.message : '';
   useEffect(() => {
@@ -64,7 +67,7 @@ export function ListingBrowser({ explore = false }: { explore?: boolean }) {
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
-      getListings({ q: query, category, produceTypeId, province })
+      getListings({ q: query, category, produceTypeId, province, agriseta })
         .then((result) => {
           if (active) {
             setListings(result.items);
@@ -80,14 +83,14 @@ export function ListingBrowser({ explore = false }: { explore?: boolean }) {
       active = false;
       clearTimeout(timer);
     };
-  }, [query, category, produceTypeId, province, retryCount, requestKey]);
+  }, [query, category, produceTypeId, province, agriseta, retryCount, requestKey]);
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     setLoadMoreError('');
     try {
-      const result = await getListings({ q: query, category, produceTypeId, province, cursor: nextCursor });
+      const result = await getListings({ q: query, category, produceTypeId, province, agriseta, cursor: nextCursor });
       setListings((current) => [...current, ...result.items]);
       setNextCursor(result.page.nextCursor);
     } catch (cause) {
@@ -192,9 +195,19 @@ export function ListingBrowser({ explore = false }: { explore?: boolean }) {
           </ScrollView>
         </View>
 
+        <View style={styles.filterSection}>
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: agrisetaOnly }}
+            onPress={() => setAgrisetaOnly((value) => !value)}
+            style={[styles.provinceChip, styles.agrisetaFilter, agrisetaOnly && styles.provinceChipActive]}>
+            <Text style={[styles.provinceText, agrisetaOnly && styles.categoryTextActive]}>{agrisetaOnly ? '★ Showing AgriSETA-supported only' : '★ Show AgriSETA-supported businesses only'}</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.listingHeading}>
           <View>
-            <Text style={styles.sectionEyebrow}>{query || category || province ? 'MATCHING DIRECTORY' : 'READY TO ENQUIRE'}</Text>
+            <Text style={styles.sectionEyebrow}>{query || category || province || agrisetaOnly ? 'MATCHING DIRECTORY' : 'READY TO ENQUIRE'}</Text>
             <Text accessibilityRole="header" style={styles.sectionTitle}>{explore ? 'Supplier directory' : 'Recently published'}</Text>
           </View>
           <Text style={styles.listingCount}>{loading ? '…' : `${listings.length} listed`}</Text>
@@ -238,7 +251,10 @@ function ListingCard({ listing, index }: { listing: ListingSummary; index: numbe
       <Pressable accessibilityRole="link" style={StyleSheet.flatten([styles.listingCard, index === 0 && styles.listingCardFeatured])}>
         <View style={[styles.cardArt, index % 2 === 0 ? styles.cardArtGold : styles.cardArtGreen]}>
           {listing.image ? <Image accessibilityLabel={listing.image.altText} source={{ uri: apiResourceUrl(listing.image.url) }} resizeMode="cover" style={styles.cardImage} /> : <Text style={styles.cardArtLetter}>{listing.categoryName.slice(0, 1).toUpperCase()}</Text>}
-          <View style={styles.verifiedBadge}><Text style={styles.badgeTick}>✓</Text><Text style={styles.badgeText}>Verified</Text></View>
+          <View style={styles.badgeStack}>
+            <View style={styles.verifiedBadge}><Text style={styles.badgeTick}>✓</Text><Text style={styles.badgeText}>Verified</Text></View>
+            {listing.agrisetaSupported ? <View style={[styles.verifiedBadge, styles.agrisetaBadge]}><Text style={styles.badgeTick}>★</Text><Text style={styles.badgeText}>AgriSETA</Text></View> : null}
+          </View>
         </View>
         <View style={styles.cardContent}>
           <Text style={styles.cardCategory}>{listing.categoryName} · {listing.type}</Text>
@@ -321,6 +337,9 @@ const styles = StyleSheet.create({
   cardArtGold: { backgroundColor: '#e8c977' },
   cardArtGreen: { backgroundColor: '#a6b99b' },
   cardArtLetter: { color: 'rgba(24, 63, 50, 0.35)', fontFamily: 'Georgia', fontSize: 60, lineHeight: 68 },
+  badgeStack: { alignItems: 'flex-end', gap: 5 },
+  agrisetaBadge: { backgroundColor: '#fdf1cf' },
+  agrisetaFilter: { alignSelf: 'flex-start' },
   verifiedBadge: { paddingHorizontal: 9, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 18, backgroundColor: '#fffefa' },
   badgeTick: { color: '#327251', fontSize: 11, fontWeight: '800' },
   badgeText: { color: '#235946', fontSize: 10, fontWeight: '800' },

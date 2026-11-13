@@ -33,6 +33,21 @@ export const verificationSubmissionStatus = pgEnum('verification_submission_stat
   'approved',
   'rejected',
 ]);
+// The buyer groups named in the AgriMarket brief, plus restaurants and informal traders.
+export const BUYER_ORGANISATION_TYPES = [
+  'retailer',
+  'hotel',
+  'restaurant',
+  'processor',
+  'exporter',
+  'municipality',
+  'government_programme',
+  'school',
+  'commercial_farm',
+  'informal_trader',
+  'other',
+] as const;
+export const buyerOrganisationType = pgEnum('buyer_organisation_type', BUYER_ORGANISATION_TYPES);
 export const enquiryStatus = pgEnum('enquiry_status', ['new', 'read', 'responded', 'closed']);
 export const southAfricanProvince = pgEnum('south_african_province', [
   'Eastern Cape',
@@ -61,6 +76,9 @@ export const users = pgTable(
     locationLabel: text('location_label'),
     locationLatitude: doublePrecision('location_latitude'),
     locationLongitude: doublePrecision('location_longitude'),
+    // Buyers say which organisation they buy for, so sellers know who is enquiring.
+    organisationName: text('organisation_name'),
+    organisationType: buyerOrganisationType('organisation_type'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -111,6 +129,11 @@ export const businesses = pgTable(
     contactPhone: text('contact_phone'),
     whatsappPhone: text('whatsapp_phone'),
     verificationStatus: businessVerificationStatus('verification_status').notNull().default('not_submitted'),
+    // AgriSETA support: the seller states it on their application (with an optional programme or
+    // learnership reference); only an administrator can confirm it, which shows the public badge.
+    agrisetaSupportClaimed: boolean('agriseta_support_claimed').notNull().default(false),
+    agrisetaReference: text('agriseta_reference'),
+    agrisetaSupported: boolean('agriseta_supported').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

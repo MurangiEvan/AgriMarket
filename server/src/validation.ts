@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { BUYER_ORGANISATION_TYPES } from './db/schema.js';
 import { RADIUS_OPTIONS_KM } from './market.js';
 
 export const provinceSchema = z.enum([
@@ -93,6 +94,8 @@ export const publicListingQuerySchema = z
     category: z.string().trim().max(80).optional(),
     produceTypeId: z.uuid().optional(),
     province: provinceSchema.optional(),
+    // Only show businesses an administrator has confirmed as AgriSETA-supported.
+    agriseta: z.enum(['true']).optional(),
     cursor: z.string().max(200).optional(),
     limit: z.coerce.number().int().min(1).max(50).default(20),
   })
@@ -109,6 +112,15 @@ export const verificationDecisionSchema = z
     decision: z.enum(['approved', 'rejected']),
     sellerFeedback: z.string().trim().max(1000).nullable().default(null),
     internalReason: z.string().trim().max(2000).nullable().default(null),
+    // Set when the admin has checked the seller's AgriSETA support claim.
+    confirmAgriseta: z.boolean().default(false),
+  })
+  .strict();
+
+export const buyerProfileSchema = z
+  .object({
+    organisationName: z.string().trim().min(2, 'Enter the name of the organisation you buy for.').max(120),
+    organisationType: z.enum(BUYER_ORGANISATION_TYPES, { message: 'Choose what kind of organisation you buy for.' }),
   })
   .strict();
 

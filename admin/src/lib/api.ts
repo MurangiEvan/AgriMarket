@@ -76,6 +76,8 @@ export const auditActionLabels: Record<string, string> = {
   'listing.archived': 'Listing archived',
   'user.password_reset': 'Password reset',
   'user.admin_bootstrap': 'Administrator account created',
+  'export.businesses': 'Verified businesses exported (CSV)',
+  'export.enquiries': 'Enquiry activity exported (CSV)',
 };
 
 export function auditLabel(action: string) {

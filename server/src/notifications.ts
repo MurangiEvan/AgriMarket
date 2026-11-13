@@ -73,6 +73,12 @@ export function listingNotification(userId: string, title: string, status: 'publ
   return null;
 }
 
-export function enquiryNotification(userId: string, listingTitle: string, message: string): NewNotification {
-  return { userId, type: 'enquiry.received', title: `New enquiry about ${listingTitle}`, body: message, link: '/enquiries' };
+export function enquiryNotification(userId: string, listingTitle: string, message: string, buyerOrganisation?: string | null): NewNotification {
+  return {
+    userId,
+    type: 'enquiry.received',
+    title: buyerOrganisation ? `New enquiry from ${buyerOrganisation} about ${listingTitle}` : `New enquiry about ${listingTitle}`,
+    body: message,
+    link: '/enquiries',
+  };
 }

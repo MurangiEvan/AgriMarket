@@ -37,3 +37,8 @@ test('long text is collapsed and shortened for display', () => {
   assert.equal(long.length, 280);
   assert.ok(long.endsWith('…'));
 });
+
+test('a new enquiry names the buyer organisation when the buyer has given one', () => {
+  assert.equal(enquiryNotification(owner, 'Avocados', 'Need 50 kg weekly', 'Protea Hotel Polokwane').title, 'New enquiry from Protea Hotel Polokwane about Avocados');
+  assert.equal(enquiryNotification(owner, 'Avocados', 'Need 50 kg weekly', null).title, 'New enquiry about Avocados');
+});

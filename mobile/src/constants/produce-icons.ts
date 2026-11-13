@@ -61,6 +61,29 @@ const produceIcons: Record<string, string> = {
   'ploughing and tillage': '🚜',
   spraying: '💦',
   'veterinary services': '🩺',
+  // Equipment services
+  'tractor hire': '🚜',
+  'implement hire': '🛠️',
+  'equipment repair and maintenance': '🔧',
+  'irrigation installation': '💧',
+  'cold room hire': '❄️',
+  // Drone services
+  'crop spraying by drone': '🛸',
+  'crop scouting and mapping': '🗺️',
+  'land surveying': '📐',
+  'livestock monitoring': '📡',
+  // Logistics and transport
+  'produce transport': '🚚',
+  'cold-chain transport': '🧊',
+  'livestock transport': '🚛',
+  'storage and warehousing': '🏬',
+  'packhouse services': '📦',
+  // Consulting and training
+  'farm business planning': '📊',
+  'agronomy advice': '🌱',
+  'skills training': '🎓',
+  'compliance and certification support': '✅',
+  'market readiness coaching': '🤝',
 };
 
 const categoryIcons: Record<string, string> = {
@@ -72,8 +95,15 @@ const categoryIcons: Record<string, string> = {
   'small-stock': '🐐',
   grain: '🌾',
   'processed-foods': '🍯',
-  'agricultural-services': '🚜',
+  'agricultural-services': '🧑‍🌾',
+  'equipment-services': '🚜',
+  'drone-services': '🛸',
+  logistics: '🚚',
+  'consulting-training': '🎓',
 };
+
+// Categories whose listings are services rather than goods (matches the server's list).
+export const SERVICE_CATEGORY_SLUGS = new Set(['agricultural-services', 'equipment-services', 'drone-services', 'logistics', 'consulting-training']);
 
 const categoryColors: Record<string, string> = {
   vegetables: '#e3f1dc',
@@ -85,6 +115,10 @@ const categoryColors: Record<string, string> = {
   grain: '#f8edc9',
   'processed-foods': '#f6e3cf',
   'agricultural-services': '#dde8f3',
+  'equipment-services': '#e6e2f3',
+  'drone-services': '#dceef2',
+  logistics: '#f1e6dd',
+  'consulting-training': '#e9f0dc',
 };
 
 export function categoryIcon(slug: string): string {

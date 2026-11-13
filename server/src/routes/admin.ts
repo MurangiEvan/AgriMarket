@@ -1,9 +1,10 @@
 import { and, desc, eq, inArray, like, lt, ne, or, sql } from 'drizzle-orm';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { z } from 'zod';
 
 import type { Database } from '../db/client.js';
-import { auditLogs, businesses, listingImages, listings, users, verificationSubmissions } from '../db/schema.js';
+import { auditLogs, businesses, categories, enquiries, listingImages, listings, users, verificationSubmissions } from '../db/schema.js';
+import { toCsv } from '../csv.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { listingNotification, notify, verificationNotification } from '../notifications.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -46,6 +47,9 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           businessName: businesses.name,
           province: businesses.province,
           ownerEmail: users.email,
+          agrisetaSupportClaimed: businesses.agrisetaSupportClaimed,
+          agrisetaReference: businesses.agrisetaReference,
+          agrisetaSupported: businesses.agrisetaSupported,
         })
         .from(verificationSubmissions)
         .innerJoin(businesses, eq(verificationSubmissions.businessId, businesses.id))
@@ -96,6 +100,7 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
             businessId: verificationSubmissions.businessId,
             businessName: businesses.name,
             ownerId: businesses.ownerId,
+            agrisetaSupportClaimed: businesses.agrisetaSupportClaimed,
           })
           .from(verificationSubmissions)
           .innerJoin(businesses, eq(verificationSubmissions.businessId, businesses.id))
@@ -117,9 +122,14 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           .where(eq(verificationSubmissions.id, submission.id))
           .returning({ id: verificationSubmissions.id, status: verificationSubmissions.status, reviewedAt: verificationSubmissions.reviewedAt });
 
+        // The AgriSETA badge is only shown when the seller claimed support and the admin confirmed it.
         await transaction
           .update(businesses)
-          .set({ verificationStatus: input.decision, updatedAt: reviewedAt })
+          .set({
+            verificationStatus: input.decision,
+            agrisetaSupported: input.decision === 'approved' && input.confirmAgriseta && submission.agrisetaSupportClaimed,
+            updatedAt: reviewedAt,
+          })
           .where(eq(businesses.id, submission.businessId));
 
         await transaction.insert(auditLogs).values({
@@ -270,6 +280,14 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           .groupBy(listings.status),
         db.select({ role: users.role, count }).from(users).where(eq(users.isActive, true)).groupBy(users.role),
       ]);
+      const [buyerTypeRows, agrisetaRows] = await Promise.all([
+        db
+          .select({ type: users.organisationType, count })
+          .from(users)
+          .where(and(eq(users.role, 'buyer'), eq(users.isActive, true)))
+          .groupBy(users.organisationType),
+        db.select({ count }).from(businesses).where(and(eq(businesses.verificationStatus, 'approved'), eq(businesses.agrisetaSupported, true))),
+      ]);
       const toRecord = <K extends string>(rows: { key: K; count: number }[]) =>
         Object.fromEntries(rows.map((row) => [row.key, row.count])) as Partial<Record<K, number>>;
       response.json({
@@ -278,8 +296,101 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           businesses: toRecord(businessRows.map((row) => ({ key: row.status, count: row.count }))),
           listings: toRecord(listingRows.map((row) => ({ key: row.status, count: row.count }))),
           users: toRecord(userRows.map((row) => ({ key: row.role, count: row.count }))),
+          // Buyers who have not said who they buy for yet are counted as "not_set".
+          buyerTypes: toRecord(buyerTypeRows.map((row) => ({ key: row.type ?? 'not_set', count: row.count }))),
+          agrisetaSupportedBusinesses: agrisetaRows[0]?.count ?? 0,
         },
       });
+    }),
+  );
+
+  // CSV exports for linkage partners (CRM, AgriSMME, enterprise-development and procurement
+  // programmes). Each download is audited because it takes business data out of AgriMarket.
+  router.get(
+    '/exports/businesses.csv',
+    asyncRoute(async (request, response) => {
+      const rows = await db
+        .select({
+          id: businesses.id,
+          name: businesses.name,
+          province: businesses.province,
+          town: businesses.town,
+          contactEmail: businesses.contactEmail,
+          contactPhone: businesses.contactPhone,
+          whatsappPhone: businesses.whatsappPhone,
+          agrisetaSupported: businesses.agrisetaSupported,
+          agrisetaReference: businesses.agrisetaReference,
+          approvedOn: businesses.updatedAt,
+        })
+        .from(businesses)
+        .where(eq(businesses.verificationStatus, 'approved'))
+        .orderBy(businesses.name);
+      const offerings = rows.length
+        ? await db
+            .select({ businessId: listings.businessId, title: listings.title, category: categories.name, type: listings.type })
+            .from(listings)
+            .innerJoin(categories, eq(listings.categoryId, categories.id))
+            .where(and(inArray(listings.businessId, rows.map((row) => row.id)), eq(listings.status, 'published')))
+        : [];
+      const byBusiness = new Map<string, { titles: Set<string>; categories: Set<string>; services: boolean; products: boolean }>();
+      for (const offering of offerings) {
+        const entry = byBusiness.get(offering.businessId) ?? { titles: new Set(), categories: new Set(), services: false, products: false };
+        entry.titles.add(offering.title);
+        entry.categories.add(offering.category);
+        if (offering.type === 'service') entry.services = true;
+        else entry.products = true;
+        byBusiness.set(offering.businessId, entry);
+      }
+      await db.insert(auditLogs).values({ actorId: request.auth!.id, action: 'export.businesses', targetType: 'export', targetId: request.auth!.id, metadata: { rows: rows.length } });
+      const csv = toCsv(
+        ['Business ID', 'Business name', 'Province', 'Town', 'Contact email', 'Mobile', 'WhatsApp', 'AgriSETA-supported', 'AgriSETA reference', 'Offers', 'Categories', 'Live listings', 'Last updated'],
+        rows.map((row) => {
+          const entry = byBusiness.get(row.id);
+          const offers = entry ? [entry.products ? 'Products' : '', entry.services ? 'Services' : ''].filter(Boolean).join(' and ') : '';
+          return [
+            row.id, row.name, row.province, row.town, row.contactEmail, row.contactPhone, row.whatsappPhone,
+            row.agrisetaSupported ? 'Yes' : 'No', row.agrisetaReference, offers,
+            entry ? [...entry.categories].join('; ') : '', entry ? [...entry.titles].join('; ') : '', row.approvedOn,
+          ];
+        }),
+      );
+      sendCsv(response, `agrimarket-verified-businesses-${today()}.csv`, csv);
+    }),
+  );
+
+  router.get(
+    '/exports/enquiries.csv',
+    asyncRoute(async (request, response) => {
+      // Linkage activity only: who asked whom about what. Message text and buyer emails stay private.
+      const rows = await db
+        .select({
+          id: enquiries.id,
+          createdAt: enquiries.createdAt,
+          status: enquiries.status,
+          businessName: businesses.name,
+          agrisetaSupported: businesses.agrisetaSupported,
+          businessProvince: businesses.province,
+          listingTitle: listings.title,
+          category: categories.name,
+          buyerOrganisation: users.organisationName,
+          buyerType: users.organisationType,
+        })
+        .from(enquiries)
+        .innerJoin(businesses, eq(enquiries.businessId, businesses.id))
+        .innerJoin(listings, eq(enquiries.listingId, listings.id))
+        .innerJoin(categories, eq(listings.categoryId, categories.id))
+        .innerJoin(users, eq(enquiries.buyerId, users.id))
+        .orderBy(desc(enquiries.createdAt))
+        .limit(10000);
+      await db.insert(auditLogs).values({ actorId: request.auth!.id, action: 'export.enquiries', targetType: 'export', targetId: request.auth!.id, metadata: { rows: rows.length } });
+      const csv = toCsv(
+        ['Enquiry ID', 'Date', 'Status', 'Seller business', 'Seller AgriSETA-supported', 'Seller province', 'Listing', 'Category', 'Buyer organisation', 'Buyer type'],
+        rows.map((row) => [
+          row.id, row.createdAt, row.status, row.businessName, row.agrisetaSupported ? 'Yes' : 'No', row.businessProvince,
+          row.listingTitle, row.category, row.buyerOrganisation, row.buyerType ? buyerTypeLabel(row.buyerType) : '',
+        ]),
+      );
+      sendCsv(response, `agrimarket-enquiries-${today()}.csv`, csv);
     }),
   );
 
@@ -311,4 +422,36 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
   );
 
   return router;
+}
+
+const buyerTypeLabels: Record<string, string> = {
+  retailer: 'Retailer',
+  hotel: 'Hotel',
+  restaurant: 'Restaurant',
+  processor: 'Processor',
+  exporter: 'Exporter',
+  municipality: 'Municipality',
+  government_programme: 'Government programme',
+  school: 'School',
+  commercial_farm: 'Commercial farm',
+  informal_trader: 'Informal trader',
+  other: 'Other',
+};
+
+function buyerTypeLabel(type: string) {
+  return buyerTypeLabels[type] ?? type;
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function sendCsv(response: Response, filename: string, csv: string) {
+  response.set({
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.send(csv);
 }

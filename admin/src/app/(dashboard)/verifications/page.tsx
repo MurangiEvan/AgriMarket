@@ -16,6 +16,9 @@ type Verification = {
   businessName: string;
   province: string;
   ownerEmail: string;
+  agrisetaSupportClaimed: boolean;
+  agrisetaReference: string | null;
+  agrisetaSupported: boolean;
   photos: { listingId: string; title: string; description: string; status: string; imageUrl: string | null }[];
 };
 
@@ -30,6 +33,8 @@ export default function VerificationsPage() {
   const [status, setStatus] = useState<Status>('pending');
   const [items, setItems] = useState<Verification[] | null>(null);
   const [feedback, setFeedback] = useState<Record<string, string>>({});
+  // AgriSETA support is only confirmed when the admin ticks the box after checking the reference.
+  const [confirmAgriseta, setConfirmAgriseta] = useState<Record<string, boolean>>({});
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -67,7 +72,7 @@ export default function VerificationsPage() {
     try {
       await api(`/admin/verifications/${item.id}/decision`, {
         method: 'POST',
-        body: JSON.stringify({ decision, sellerFeedback: sellerFeedback || null, internalReason: null }),
+        body: JSON.stringify({ decision, sellerFeedback: sellerFeedback || null, internalReason: null, confirmAgriseta: decision === 'approved' && Boolean(confirmAgriseta[item.id]) }),
       });
       setNotice(decision === 'approved' ? `${item.businessName} is approved and their produce photo is now live for buyers.` : `${item.businessName} was rejected and the seller can see your feedback.`);
       await Promise.all([load(status), refreshOverview()]);
@@ -141,6 +146,27 @@ export default function VerificationsPage() {
                 </figure>
               ))}
             </div>
+          </div>
+
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="label">AgriSETA support</span>
+            {item.agrisetaSupportClaimed ? (
+              <>
+                <p>The seller says this business is <strong>AgriSETA-supported</strong>{item.agrisetaReference ? <> · reference <code>{item.agrisetaReference}</code></> : ' (no reference given)'}.</p>
+                {item.status === 'pending' ? (
+                  <label className="row" style={{ gap: 8, fontSize: 14 }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(confirmAgriseta[item.id])}
+                      onChange={(event) => setConfirmAgriseta((current) => ({ ...current, [item.id]: event.target.checked }))}
+                    />
+                    I have checked this and confirm AgriSETA support (shows the badge to buyers)
+                  </label>
+                ) : (
+                  <p className="muted">{item.agrisetaSupported ? 'Confirmed: buyers see the AgriSETA-supported badge.' : 'Not confirmed: no badge is shown.'}</p>
+                )}
+              </>
+            ) : <p className="muted">Not claimed.</p>}
           </div>
 
           {item.status === 'pending' ? (

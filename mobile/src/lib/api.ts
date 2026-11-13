@@ -39,6 +39,7 @@ export type ListingSummary = {
   verified: boolean;
   businessId: string;
   businessName: string;
+  agrisetaSupported: boolean;
   categorySlug: string;
   categoryName: string;
   image: { id: string; altText: string; url: string } | null;
@@ -64,6 +65,7 @@ export type PublicBusiness = {
   contactPhone: string | null;
   whatsappPhone: string | null;
   verified: boolean;
+  agrisetaSupported: boolean;
 };
 
 // In local development the computer's LAN address changes with the network, so follow the host the app
@@ -306,7 +308,7 @@ function isPrivateIpv4Address(hostname: string) {
   return first === 10 || (first === 192 && second === 168) || (first === 172 && second !== undefined && second >= 16 && second <= 31);
 }
 
-export async function getListings(filters: { q?: string; category?: string; produceTypeId?: string; province?: string; cursor?: string } = {}) {
+export async function getListings(filters: { q?: string; category?: string; produceTypeId?: string; province?: string; agriseta?: 'true'; cursor?: string } = {}) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
     if (value) query.set(key, value);
@@ -408,4 +410,35 @@ export async function markNotificationRead(id: string): Promise<void> {
 
 export async function markAllNotificationsRead(): Promise<void> {
   await apiRequest('/notifications/read-all', { method: 'POST' });
+}
+
+// Who the buyer buys for. Sellers see this on enquiries; it is needed before the first enquiry.
+export const BUYER_ORGANISATION_TYPES = [
+  { value: 'retailer', label: 'Retailer' },
+  { value: 'hotel', label: 'Hotel or lodge' },
+  { value: 'restaurant', label: 'Restaurant or caterer' },
+  { value: 'processor', label: 'Food processor' },
+  { value: 'exporter', label: 'Exporter' },
+  { value: 'municipality', label: 'Municipality' },
+  { value: 'government_programme', label: 'Government programme' },
+  { value: 'school', label: 'School' },
+  { value: 'commercial_farm', label: 'Commercial farm' },
+  { value: 'informal_trader', label: 'Spaza or informal trader' },
+  { value: 'other', label: 'Other' },
+] as const;
+export type BuyerOrganisationType = (typeof BUYER_ORGANISATION_TYPES)[number]['value'];
+export type BuyerProfile = { organisationName: string; organisationType: BuyerOrganisationType };
+
+export function buyerOrganisationLabel(type: string | null | undefined) {
+  return BUYER_ORGANISATION_TYPES.find((option) => option.value === type)?.label ?? '';
+}
+
+export async function getBuyerProfile(): Promise<BuyerProfile | null> {
+  const result = await apiRequest<{ profile: BuyerProfile | null }>('/buyer/profile');
+  return result.profile;
+}
+
+export async function saveBuyerProfile(profile: BuyerProfile): Promise<BuyerProfile> {
+  const result = await apiRequest<{ profile: BuyerProfile }>('/buyer/profile', { method: 'PUT', body: JSON.stringify(profile) });
+  return result.profile;
 }

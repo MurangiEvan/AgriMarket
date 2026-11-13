@@ -11,6 +11,8 @@ type Overview = {
   businesses: Partial<Record<'not_submitted' | 'pending' | 'approved' | 'rejected', number>>;
   listings: Partial<Record<'draft' | 'pending' | 'published' | 'rejected' | 'archived', number>>;
   users: Partial<Record<'buyer' | 'seller' | 'admin', number>>;
+  buyerTypes: Partial<Record<string, number>>;
+  agrisetaSupportedBusinesses: number;
 };
 
 type AdminContextValue = {

@@ -6,13 +6,16 @@ import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { ApiError, apiRequest, apiResourceUrl, getCategories, getSellerProduceTypes, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
-import { categoryColor, categoryIcon, produceIcon } from '@/constants/produce-icons';
+import { ApiError, apiRequest, apiResourceUrl, BUYER_ORGANISATION_TYPES, buyerOrganisationLabel, getBuyerProfile, getCategories, getSellerProduceTypes, saveBuyerProfile, type BuyerOrganisationType, type BuyerProfile, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
+import { categoryColor, categoryIcon, produceIcon, SERVICE_CATEGORY_SLUGS } from '@/constants/produce-icons';
 import { greeting, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
 
 type BusinessProfile = {
   id: string;
+  agrisetaSupportClaimed?: boolean;
+  agrisetaReference?: string | null;
+  agrisetaSupported?: boolean;
   name: string;
   description: string;
   address: string | null;
@@ -126,8 +129,81 @@ function AccountFrame({ children }: React.PropsWithChildren) {
   return <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled"><View style={styles.frame}>{children}</View></ScrollView>;
 }
 
+function BuyerOrganisation() {
+  const [organisationName, setOrganisationName] = useState('');
+  const [organisationType, setOrganisationType] = useState<BuyerOrganisationType | ''>('');
+  const [saved, setSaved] = useState<BuyerProfile | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    getBuyerProfile()
+      .then((profile) => {
+        if (!active) return;
+        setSaved(profile);
+        setOrganisationName(profile?.organisationName ?? '');
+        setOrganisationType(profile?.organisationType ?? '');
+        setLoaded(true);
+      })
+      .catch((cause: unknown) => { if (active) { setError(cause instanceof ApiError ? cause.message : 'Your organisation details could not be loaded.'); setLoaded(true); } });
+    return () => { active = false; };
+  }, []);
+
+  async function save() {
+    if (organisationName.trim().length < 2 || !organisationType) {
+      setError('Enter your organisation name and choose its type.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const profile = await saveBuyerProfile({ organisationName: organisationName.trim(), organisationType });
+      setSaved(profile);
+      setNotice('Saved. Sellers will see who you buy for when you send an enquiry.');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Your organisation details could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Who you buy for</Text>
+        {saved ? <Text style={styles.statusTag}>{buyerOrganisationLabel(saved.organisationType)}</Text> : null}
+      </View>
+      {loaded && !saved ? (
+        <View style={[styles.banner, styles.bannerWaiting]}>
+          <Text style={styles.bannerTitle}>Tell sellers who you are</Text>
+          <Text style={styles.bannerBody}>Add your organisation before sending your first enquiry. Sellers respond faster when they know they are dealing with a hotel, school, retailer or processor.</Text>
+        </View>
+      ) : null}
+      <Text style={styles.fieldLabel}>Organisation name</Text>
+      <TextInput accessibilityLabel="Organisation name" placeholder="e.g. Protea Hotel Polokwane" placeholderTextColor="#7a877f" value={organisationName} onChangeText={setOrganisationName} style={styles.input} />
+      <Text style={styles.fieldLabel}>Type of organisation</Text>
+      <View style={styles.choiceWrap}>
+        {BUYER_ORGANISATION_TYPES.map((option) => (
+          <Pressable key={option.value} accessibilityRole="button" accessibilityState={{ selected: organisationType === option.value }} onPress={() => setOrganisationType(option.value)} style={[styles.choice, organisationType === option.value && styles.choiceActive]}>
+            <Text style={[styles.choiceText, organisationType === option.value && styles.choiceTextActive]}>{option.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Pressable accessibilityRole="button" disabled={saving} onPress={() => void save()} style={[styles.primaryButton, saving && styles.disabled]}>
+        <Text style={styles.primaryText}>{saving ? 'Saving…' : saved ? 'Save changes' : 'Save organisation'}</Text>
+      </Pressable>
+      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+      {notice ? <Text accessibilityRole="status" style={styles.success}>{notice}</Text> : null}
+    </View>
+  );
+}
+
 function BuyerDashboard() {
-  return <View style={styles.section}><Text style={styles.sectionTitle}>Your enquiries</Text><Text style={styles.muted}>Enquiries stay in your account so you can follow each supplier conversation.</Text><Link href="/market" style={styles.linkText}>Find produce near me</Link><Link href="/enquiries" style={styles.linkText}>View your enquiries</Link><Link href="/explore" style={styles.linkText}>Search the supplier directory</Link></View>;
+  return <><BuyerOrganisation /><View style={styles.section}><Text style={styles.sectionTitle}>Your enquiries</Text><Text style={styles.muted}>Enquiries stay in your account so you can follow each supplier conversation.</Text><Link href="/market" style={styles.linkText}>Find produce near me</Link><Link href="/enquiries" style={styles.linkText}>View your enquiries</Link><Link href="/explore" style={styles.linkText}>Search the supplier directory</Link><Text style={styles.helper}>AgriMarket links you with verified businesses. Prices, payment and delivery are agreed directly with the seller.</Text></View></>;
 }
 
 function SellerDashboard({ user }: { user: SessionUser }) {
@@ -156,6 +232,9 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const [applicationDocuments, setApplicationDocuments] = useState<ListingPhotoDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [submittingApplication, setSubmittingApplication] = useState(false);
+  // Optional: the seller says they are AgriSETA-supported; the admin confirms before a badge shows.
+  const [agrisetaClaim, setAgrisetaClaim] = useState(false);
+  const [agrisetaReference, setAgrisetaReference] = useState('');
   const applicationStatus = verification?.verificationStatus ?? business?.verificationStatus ?? 'not_submitted';
   const approved = applicationStatus === 'approved';
   const applying = applicationStatus === 'not_submitted' || applicationStatus === 'rejected';
@@ -164,7 +243,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const applicationChecklist = [
     { done: missingDetails.length === 0, label: missingDetails.length ? `Business details: add ${missingDetails.join(', ')}` : 'Business details complete' },
     { done: applicationDocuments.length > 0, label: applicationDocuments.length ? `${applicationDocuments.length} verification ${applicationDocuments.length === 1 ? 'document' : 'documents'} added` : 'Add at least one verification document' },
-    { done: Boolean(produceTypeId && listingPhotoDraft), label: produceTypeId && listingPhotoDraft ? 'Produce photo added' : 'Choose what you sell and add a photo' },
+    { done: Boolean(produceTypeId && listingPhotoDraft), label: produceTypeId && listingPhotoDraft ? 'Photo of what you offer added' : 'Choose what you offer and add a photo' },
   ];
   const applicationReady = applicationChecklist.every((item) => item.done);
   const [error, setError] = useState('');
@@ -273,7 +352,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
           description: note.length >= 10 ? note : `${produceType.name} from ${business.name}${place}.${note ? ` ${note}` : ''}`,
           province: business.province,
           town: business.town,
-          type: category.slug === 'agricultural-services' ? 'service' : 'product',
+          type: SERVICE_CATEGORY_SLUGS.has(category.slug) ? 'service' : 'product',
         }),
       });
       const listingId = created.listing.id;
@@ -377,6 +456,8 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       form.append('categoryId', categoryId);
       form.append('produceTypeId', produceTypeId);
       if (photoNote.trim()) form.append('note', photoNote.trim());
+      form.append('agrisetaSupported', agrisetaClaim ? 'true' : 'false');
+      if (agrisetaClaim && agrisetaReference.trim()) form.append('agrisetaReference', agrisetaReference.trim());
       await apiRequest('/seller/application', { method: 'POST', body: form });
       setApplicationDocuments([]);
       setListingPhotoDraft(null);
@@ -401,13 +482,13 @@ function SellerDashboard({ user }: { user: SessionUser }) {
         </View>
       </View> : <Pressable accessibilityRole="button" disabled={busy || submittingApplication} onPress={() => void chooseNewListingPhoto()} style={styles.secondaryButton}><Text style={styles.secondaryText}>Choose photo</Text></Pressable>}
       <Text style={styles.helper}>JPEG, PNG or WebP. A clear, well-lit photo helps buyers.</Text>
-      <Text style={styles.fieldLabel}>Short note for buyers (optional)</Text>
-      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes in 10 kg boxes, harvested every week" placeholderTextColor="#7a877f" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
+      <Text style={styles.fieldLabel}>Short description for buyers (optional)</Text>
+      <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes in 10 kg boxes every week, or: drone spraying within 50 km of Tzaneen" placeholderTextColor="#7a877f" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
     </>
   );
 
   const banner = applicationStatus === 'approved'
-    ? { tone: styles.bannerSuccess, title: 'Your business is verified', body: 'Buyers can find you in the market. Add more produce photos below; each one is checked by the admin before buyers see it.' }
+    ? { tone: styles.bannerSuccess, title: 'Your business is verified', body: `Buyers can find you in the market${business?.agrisetaSupported ? ' with the AgriSETA-supported badge' : ''}. Add more products or services below; each one is checked by the admin before buyers see it.` }
     : applicationStatus === 'pending'
       ? { tone: styles.bannerWaiting, title: 'Your application is with the admin', body: 'The admin is reviewing your business details, documents and photo. You will get a notification as soon as it has been reviewed.' }
       : applicationStatus === 'rejected'
@@ -450,13 +531,28 @@ function SellerDashboard({ user }: { user: SessionUser }) {
           <Text style={styles.helper}>PDF, JPEG or PNG · up to 5 documents, 10 MB each. They are only sent when you submit your application.</Text>
 
           <View style={styles.rule} />
-          <Text style={styles.sectionTitle}>Step 3 · Produce photo</Text>
-          <Text style={styles.muted}>Show the admin and buyers what you sell. Once your application is approved, this photo goes live in the market.</Text>
+          <Text style={styles.sectionTitle}>Step 3 · What you offer</Text>
+          <Text style={styles.muted}>Produce, livestock, processed products or a service such as equipment hire, drone spraying, transport or training. Add a photo that shows it. Once your application is approved, this photo goes live in the market.</Text>
           {producePicker}
 
           <View style={styles.rule} />
           <Text style={styles.sectionTitle}>Submit your application</Text>
           <Text style={styles.muted}>Your business details, documents and photo are sent to the admin together, as one application.</Text>
+          <Text style={styles.fieldLabel}>AgriSETA support (optional)</Text>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: agrisetaClaim }}
+            onPress={() => setAgrisetaClaim((value) => !value)}
+            style={[styles.choice, styles.checkboxRow, agrisetaClaim && styles.choiceActive]}
+          >
+            <Text style={[styles.choiceText, agrisetaClaim && styles.choiceTextActive]}>{agrisetaClaim ? '☑' : '☐'}  My business is supported by AgriSETA (e.g. a learnership, skills programme or grant)</Text>
+          </Pressable>
+          {agrisetaClaim ? (
+            <>
+              <TextInput accessibilityLabel="AgriSETA programme or reference number" placeholder="e.g. Learnership AGRI-2026-0142 or programme name" placeholderTextColor="#7a877f" value={agrisetaReference} onChangeText={setAgrisetaReference} style={styles.input} />
+              <Text style={styles.helper}>The admin checks this before buyers see an AgriSETA-supported badge on your business. You can add proof to your verification documents.</Text>
+            </>
+          ) : null}
           <View style={styles.checklist}>
             {applicationChecklist.map((item) => (
               <Text key={item.label} style={[styles.checkItem, item.done && styles.checkItemDone]}>{item.done ? '✓' : '○'}  {item.label}</Text>
@@ -479,8 +575,8 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       {approved ? (
         <>
           <View style={styles.rule} />
-          <Text style={styles.sectionTitle}>Your produce photos</Text>
-          <Text style={styles.muted}>Add more photos of what you sell. Each new photo is checked by the admin, then shown to buyers under that produce.</Text>
+          <Text style={styles.sectionTitle}>What you offer</Text>
+          <Text style={styles.muted}>Add more products or services, each with a photo. Every new one is checked by the admin, then shown to buyers in the market.</Text>
           {visibleListings.length === 0 ? <Text style={styles.helper}>No photos yet. Add your first one below.</Text> : photoGrid(true)}
           {producePicker}
           <Pressable accessibilityRole="button" disabled={busy || !produceTypeId || !listingPhotoDraft} onPress={() => void addProducePhoto()} style={[styles.primaryButton, (busy || !produceTypeId || !listingPhotoDraft) && styles.disabled]}><Text style={styles.primaryText}>{busy ? 'Uploading…' : 'Add photo'}</Text></Pressable>
@@ -561,6 +657,7 @@ const styles = StyleSheet.create({
   bannerBody: { color: '#3f5147', fontSize: 13, lineHeight: 19 },
   documentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e3e8de', backgroundColor: '#fbfcf9' },
   documentName: { flex: 1, color: '#183f32', fontSize: 13, fontWeight: '600' },
+  checkboxRow: { alignSelf: 'stretch', paddingVertical: 10 },
   checklist: { gap: 6, padding: 14, borderRadius: 12, backgroundColor: '#f3f5ed' },
   checkItem: { color: '#7a6a4f', fontSize: 13, lineHeight: 19 },
   checkItemDone: { color: '#235946', fontWeight: '700' },

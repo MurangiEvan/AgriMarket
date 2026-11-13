@@ -16,6 +16,7 @@ export default function ListingDetailScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [needsBuyerProfile, setNeedsBuyerProfile] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -63,6 +64,7 @@ export default function ListingDetailScreen() {
       setMessage('');
       setNotice('Your enquiry was sent to the supplier.');
     } catch (cause) {
+      setNeedsBuyerProfile(cause instanceof ApiError && cause.code === 'BUYER_PROFILE_REQUIRED');
       setError(cause instanceof ApiError ? cause.message : 'Your enquiry could not be sent.');
     } finally {
       setSubmitting(false);
@@ -79,7 +81,10 @@ export default function ListingDetailScreen() {
         <Link href="/explore" style={styles.backLink}>← Back to suppliers</Link>
         <View style={styles.art}>
           {listing.images.length > 0 ? <Image accessibilityLabel={listing.images[0]?.altText} source={{ uri: apiResourceUrl(listing.images[0]!.url) }} resizeMode="cover" style={styles.heroImage} /> : <Text style={styles.artMark}>{listing.categoryName.slice(0, 1).toUpperCase()}</Text>}
-          <View style={styles.badge}><Text style={styles.badgeText}>✓ VERIFIED BUSINESS</Text></View>
+          <View style={styles.badgeRow}>
+            <View style={styles.badgeInline}><Text style={styles.badgeText}>✓ VERIFIED BUSINESS</Text></View>
+            {business.agrisetaSupported ? <View style={[styles.badgeInline, styles.badgeAgriseta]}><Text style={styles.badgeText}>★ AGRISETA-SUPPORTED</Text></View> : null}
+          </View>
         </View>
         {listing.images.length > 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.gallery}>{listing.images.slice(1).map((image) => <Image key={image.id} accessibilityLabel={image.altText} source={{ uri: apiResourceUrl(image.url) }} resizeMode="cover" style={styles.galleryImage} />)}</ScrollView> : null}
         <View style={styles.columns}>
@@ -98,6 +103,9 @@ export default function ListingDetailScreen() {
               {business.whatsappPhone && <ContactAction label="WhatsApp" url={`https://wa.me/${business.whatsappPhone.replace('+', '')}`} />}
               {business.contactEmail && <ContactAction label="Email" url={`mailto:${business.contactEmail}`} />}
             </View>
+            <View style={styles.linkageNote}>
+              <Text style={styles.linkageText}>AgriMarket links verified businesses. It does not take payments or arrange delivery: agree price, payment and delivery directly with {business.name}.</Text>
+            </View>
             <Pressable accessibilityRole="button" onPress={shareListing} style={styles.shareButton}><Text style={styles.shareText}>↗  Share listing</Text></Pressable>
             {notice ? <Text accessibilityRole="status" style={styles.success}>{notice}</Text> : null}
           </View>
@@ -115,6 +123,7 @@ export default function ListingDetailScreen() {
               <Link href="/account" style={styles.signInLink}>Sign in or register</Link>
             </>}
             {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+            {needsBuyerProfile ? <Link href="/account" style={styles.signInLink}>Add who you buy for on your Profile</Link> : null}
           </View>
         </View>
       </View>
@@ -146,11 +155,16 @@ const styles = StyleSheet.create({
   gallery: { paddingTop: 10, gap: 10 },
   galleryImage: { width: 112, height: 82, borderRadius: 5 },
   artMark: { color: 'rgba(24, 63, 50, 0.34)', fontFamily: 'Georgia', fontSize: 142, lineHeight: 160 },
-  badge: { marginTop: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#fffefa' },
+  badgeRow: { flexShrink: 1, marginTop: 5, marginLeft: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 },
+  badgeInline: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#fffefa' },
+  badgeAgriseta: { backgroundColor: '#fdf1cf' },
+  linkageNote: { marginTop: 12, padding: 12, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: '#c9a64a', backgroundColor: '#fbf6e8' },
+  linkageText: { color: '#4d4630', fontSize: 12, lineHeight: 18 },
   badgeText: { color: '#235946', fontSize: 10, fontWeight: '800' },
   columns: { marginTop: 28, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: 30 },
-  primary: { flexGrow: 2, flexBasis: 430, maxWidth: 700 },
-  enquiryPanel: { flexGrow: 1, flexBasis: 280, padding: 19, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 8, backgroundColor: '#fffefa', gap: 12 },
+  // flexShrink lets both columns fit a phone screen instead of overflowing past the edge.
+  primary: { flexGrow: 2, flexShrink: 1, flexBasis: 430, minWidth: 0, maxWidth: 700 },
+  enquiryPanel: { flexGrow: 1, flexShrink: 1, flexBasis: 280, minWidth: 0, padding: 19, borderWidth: 1, borderColor: '#d8ded4', borderRadius: 8, backgroundColor: '#fffefa', gap: 12 },
   eyebrow: { color: '#a05d3c', fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
   title: { marginTop: 7, color: '#183f32', fontFamily: 'Georgia', fontSize: 34, lineHeight: 39 },
   location: { marginTop: 8, color: '#65736a', fontSize: 13 },

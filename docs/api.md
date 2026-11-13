@@ -40,6 +40,10 @@ Browser authentication uses opaque server-side sessions in HttpOnly cookies. Tok
 | GET | `/admin/verifications/:id/documents/:index` | Admin | Read one private document with no-store headers and access audit |
 | PATCH | `/admin/listings/:id/moderation` | Admin | Moderate listing and audit action |
 | GET | `/admin/audit-logs` | Admin | Restricted audit access; optional filters `action` (prefix, e.g. `verification.`), `targetType`, `before` (ISO timestamp, for older pages) and `limit` (1–100) |
+| GET/PUT | `/buyer/profile` | Buyer | Organisation name and type (retailer, hotel, restaurant, processor, exporter, municipality, government programme, school, commercial farm, informal trader, other); required before the first enquiry (409 `BUYER_PROFILE_REQUIRED`) |
+| GET | `/listings?agriseta=true` | Public | Directory filtered to businesses an admin confirmed as AgriSETA-supported; listings and businesses include `agrisetaSupported` |
+| GET | `/admin/exports/businesses.csv` | Admin | Verified businesses with contacts, offerings and AgriSETA status for CRM/partner import (audited) |
+| GET | `/admin/exports/enquiries.csv` | Admin | Enquiry activity (seller, listing, category, buyer organisation and type, status); no message text or buyer email (audited) |
 | GET | `/notifications` | Signed in | The user's own notifications (newest first, `limit` 1–50) and `unreadCount` |
 | GET | `/notifications/unread-count` | Signed in | Unread count for the bell badge |
 | POST | `/notifications/:id/read` | Signed in | Mark one of the user's own notifications as read (204) |

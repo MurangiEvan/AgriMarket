@@ -28,6 +28,7 @@ const actionOptions = [
   { value: 'listing.', label: 'All photo and listing events' },
   { value: 'listing.published', label: 'Photo published' },
   { value: 'listing.rejected', label: 'Photo rejected' },
+  { value: 'export.', label: 'Data exports' },
   { value: 'user.', label: 'All account events' },
   { value: 'user.password_reset', label: 'Password reset' },
 ];
@@ -37,6 +38,7 @@ const targetOptions = [
   { value: 'verification_submission', label: 'Verification submission' },
   { value: 'listing', label: 'Listing' },
   { value: 'user', label: 'User account' },
+  { value: 'export', label: 'Data export' },
 ];
 
 function buildQuery(filters: Filters, before?: string) {

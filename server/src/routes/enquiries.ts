@@ -32,6 +32,16 @@ export function createBuyerEnquiriesRouter(db: Database, sessionSecret: string):
         return;
       }
 
+      // Sellers need to know who is enquiring (a hotel, a school, a processor...).
+      const [buyer] = await db
+        .select({ organisationName: users.organisationName, organisationType: users.organisationType })
+        .from(users)
+        .where(eq(users.id, request.auth!.id))
+        .limit(1);
+      if (!buyer?.organisationName || !buyer.organisationType) {
+        throw new HttpError(409, 'BUYER_PROFILE_REQUIRED', 'Tell sellers who you buy for first: add your organisation name and type on your Profile page.');
+      }
+
       const [listing] = await db
         .select({ id: listings.id, businessId: businesses.id, title: listings.title, ownerId: businesses.ownerId })
         .from(listings)
@@ -63,7 +73,7 @@ export function createBuyerEnquiriesRouter(db: Database, sessionSecret: string):
           })
           .onConflictDoNothing({ target: [enquiries.buyerId, enquiries.idempotencyKey] })
           .returning();
-        if (inserted) await notify(transaction, enquiryNotification(listing.ownerId, listing.title, input.message));
+        if (inserted) await notify(transaction, enquiryNotification(listing.ownerId, listing.title, input.message, buyer.organisationName));
         return inserted;
       });
       if (created) {
@@ -136,6 +146,8 @@ export function createSellerEnquiriesRouter(db: Database, sessionSecret: string)
           listingId: listings.id,
           listingTitle: listings.title,
           buyerEmail: users.email,
+          buyerOrganisationName: users.organisationName,
+          buyerOrganisationType: users.organisationType,
         })
         .from(enquiries)
         .innerJoin(listings, eq(enquiries.listingId, listings.id))

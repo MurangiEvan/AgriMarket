@@ -23,6 +23,14 @@ const sections: Section[] = [
         a: 'Open Profile and complete the three steps of your application: your business details, your verification documents (such as a CIPC registration certificate) and a photo of your produce. Then tap "Submit application". Everything goes to an AgriMarket administrator together, and you get a notification when it has been reviewed.',
       },
       {
+        q: 'What can I offer on AgriMarket?',
+        a: 'Produce, livestock, processed products, and services: agricultural services, equipment hire and repairs, drone services, logistics and transport, and consulting and training. Choose the category that fits and add a photo that shows what you offer.',
+      },
+      {
+        q: 'What does the AgriSETA-supported badge mean?',
+        a: 'If AgriSETA has supported your business (for example through a learnership, skills programme or grant), tick the AgriSETA box on your application and add the programme or reference. The admin checks it before buyers see the badge, and buyers can filter the directory to AgriSETA-supported businesses.',
+      },
+      {
         q: 'Which documents can I upload?',
         a: 'PDF, JPEG or PNG files. You can add up to 5 documents, each up to 10 MB. Make sure every page is clear and readable. They are only sent when you submit your application.',
       },
@@ -45,6 +53,10 @@ const sections: Section[] = [
     title: 'For buyers',
     icon: '🧺',
     questions: [
+      {
+        q: 'Who can buy on AgriMarket?',
+        a: 'Businesses and organisations that buy from farmers and agricultural suppliers: retailers, hotels, restaurants, processors, exporters, municipalities, government programmes, schools, commercial farms and informal traders. Add your organisation name and type on your Profile page before your first enquiry, so sellers know who they are dealing with.',
+      },
       {
         q: 'How do I find produce near me?',
         a: 'Open Near me and tap "Use my current location", or save an area such as your town or suburb. You will see produce from verified suppliers near you, with the distance to the nearest one. You can also use Search to look through the whole directory.',

@@ -6,7 +6,7 @@ import { users } from '../db/schema.js';
 import { searchLocations } from '../geocoding.js';
 import { asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { locationSearchQuerySchema, savedLocationSchema } from '../validation.js';
+import { buyerProfileSchema, locationSearchQuerySchema, savedLocationSchema } from '../validation.js';
 
 export function createBuyerRouter(db: Database, sessionSecret: string, googleMapsApiKey?: string): Router {
   const router = Router();
@@ -32,6 +32,33 @@ export function createBuyerRouter(db: Database, sessionSecret: string, googleMap
               : null,
         },
       });
+    }),
+  );
+
+  // Which organisation the buyer buys for (e.g. "Protea Hotel Polokwane", hotel). Sellers see it
+  // on enquiries; it is required before the first enquiry.
+  router.get(
+    '/profile',
+    asyncRoute(async (request, response) => {
+      const [user] = await db
+        .select({ organisationName: users.organisationName, organisationType: users.organisationType })
+        .from(users)
+        .where(and(eq(users.id, request.auth!.id), eq(users.role, 'buyer')))
+        .limit(1);
+      response.json({ data: { profile: user?.organisationName && user.organisationType ? user : null } });
+    }),
+  );
+
+  router.put(
+    '/profile',
+    asyncRoute(async (request, response) => {
+      const input = buyerProfileSchema.parse(request.body);
+      const [profile] = await db
+        .update(users)
+        .set({ organisationName: input.organisationName, organisationType: input.organisationType, updatedAt: new Date() })
+        .where(and(eq(users.id, request.auth!.id), eq(users.role, 'buyer')))
+        .returning({ organisationName: users.organisationName, organisationType: users.organisationType });
+      response.json({ data: { profile } });
     }),
   );
 

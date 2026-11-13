@@ -2,7 +2,7 @@ import { Link } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { ApiError, apiRequest } from '@/lib/api';
+import { ApiError, apiRequest, buyerOrganisationLabel } from '@/lib/api';
 import { HeroPill, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
 
@@ -15,6 +15,8 @@ type EnquiryItem = {
   listingTitle: string;
   businessName?: string;
   buyerEmail?: string;
+  buyerOrganisationName?: string | null;
+  buyerOrganisationType?: string | null;
 };
 
 export default function EnquiriesScreen() {
@@ -79,7 +81,7 @@ export default function EnquiriesScreen() {
         {user && (user.role === 'buyer' || user.role === 'seller') && !loading && enquiries.length === 0 ? <View style={styles.panel}><Text style={styles.panelTitle}>No enquiries yet</Text><Text style={styles.body}>{user.role === 'seller' ? 'New buyer messages for your business will appear here.' : 'Your sent messages will appear here.'}</Text>{user.role === 'buyer' ? <Link href="/explore" style={styles.link}>Find suppliers</Link> : null}</View> : null}
         {enquiries.map((item) => <View key={item.id} style={styles.panel}>
           <View style={styles.row}><Text style={styles.panelTitle}>{item.listingTitle}</Text><Text style={styles.status}>{formatStatus(item.status)}</Text></View>
-          <Text style={styles.body}>{user?.role === 'seller' ? `From ${item.buyerEmail ?? 'buyer'}` : `To ${item.businessName ?? 'supplier'}`}</Text>
+          <Text style={styles.body}>{user?.role === 'seller' ? `From ${[item.buyerOrganisationName, buyerOrganisationLabel(item.buyerOrganisationType)].filter(Boolean).join(' · ') || 'a buyer'}${item.buyerEmail ? ` (${item.buyerEmail})` : ''}` : `To ${item.businessName ?? 'supplier'}`}</Text>
           <Text style={styles.message}>{item.message}</Text>
           <Text style={styles.date}>{new Date(item.createdAt).toLocaleString()}</Text>
           <Link href={{ pathname: '/listing', params: { id: item.listingId } }} style={styles.link}>Open listing</Link>

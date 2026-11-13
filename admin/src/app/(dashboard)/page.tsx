@@ -8,6 +8,21 @@ import { api, auditLabel, errorMessage, formatDateTime } from '@/lib/api';
 
 type AuditItem = { id: string; action: string; targetType: string; createdAt: string };
 
+const buyerTypeOptions = [
+  { value: 'retailer', label: 'Retailers' },
+  { value: 'hotel', label: 'Hotels' },
+  { value: 'restaurant', label: 'Restaurants' },
+  { value: 'processor', label: 'Processors' },
+  { value: 'exporter', label: 'Exporters' },
+  { value: 'municipality', label: 'Municipalities' },
+  { value: 'government_programme', label: 'Government programmes' },
+  { value: 'school', label: 'Schools' },
+  { value: 'commercial_farm', label: 'Commercial farms' },
+  { value: 'informal_trader', label: 'Informal traders' },
+  { value: 'other', label: 'Other' },
+  { value: 'not_set', label: 'Not set yet' },
+];
+
 function greeting() {
   const hour = new Date().getHours();
   return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -58,8 +73,40 @@ export default function OverviewPage() {
           <div className="stat"><span>Published listings</span><strong>{value(overview?.listings.published)}</strong></div>
           <div className="stat"><span>Sellers</span><strong>{value(overview?.users.seller)}</strong></div>
           <div className="stat"><span>Buyers</span><strong>{value(overview?.users.buyer)}</strong></div>
-          <div className="stat"><span>Rejected verifications</span><strong>{value(overview?.verifications.rejected)}</strong></div>
+          <div className="stat"><span>AgriSETA-supported businesses</span><strong>{value(overview?.agrisetaSupportedBusinesses)}</strong></div>
+          <div className="stat"><span>Rejected applications</span><strong>{value(overview?.verifications.rejected)}</strong></div>
         </div>
+      </section>
+
+      <section aria-labelledby="buyers-title" className="card stack">
+        <div>
+          <h2 id="buyers-title">Who is buying</h2>
+          <p className="muted">Buyer organisations by type. Buyers choose a type before sending their first enquiry.</p>
+        </div>
+        {overview ? (
+          <div className="row">
+            {buyerTypeOptions
+              .map((type) => ({ ...type, count: overview.buyerTypes[type.value] ?? 0 }))
+              .filter((type) => type.count > 0 || type.value !== 'not_set')
+              .map((type) => (
+                <span key={type.value} className="pill" style={{ fontSize: 13, padding: '6px 12px' }}>
+                  {type.label}: {type.count}
+                </span>
+              ))}
+          </div>
+        ) : <p className="muted">Loading…</p>}
+      </section>
+
+      <section aria-labelledby="exports-title" className="card stack">
+        <div>
+          <h2 id="exports-title">Exports for partners</h2>
+          <p className="muted">Download CSV files for a CRM, AgriSMME or procurement and enterprise-development partners. Each download is recorded in the audit log.</p>
+        </div>
+        <div className="row">
+          <a className="button secondary" href="/api/v1/admin/exports/businesses.csv" download>Verified businesses (CSV)</a>
+          <a className="button secondary" href="/api/v1/admin/exports/enquiries.csv" download>Enquiry activity (CSV)</a>
+        </div>
+        <p className="muted">The business file includes contact details: share it only with approved partners. The enquiry file leaves out message text and buyer emails.</p>
       </section>
 
       <section aria-labelledby="recent-title" className="card stack">

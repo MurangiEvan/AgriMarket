@@ -28,6 +28,7 @@ export function createListingsRouter(db: Database): Router {
       if (query.province) conditions.push(eq(listings.province, query.province));
       if (query.category) conditions.push(eq(categories.slug, query.category));
       if (query.produceTypeId) conditions.push(eq(listings.produceTypeId, query.produceTypeId));
+      if (query.agriseta) conditions.push(eq(businesses.agrisetaSupported, true));
       if (cursor) {
         const cursorDate = new Date(cursor.createdAt);
         conditions.push(
@@ -55,6 +56,7 @@ export function createListingsRouter(db: Database): Router {
           createdAt: listings.createdAt,
           businessId: businesses.id,
           businessName: businesses.name,
+          agrisetaSupported: businesses.agrisetaSupported,
           categorySlug: categories.slug,
           categoryName: categories.name,
         })
@@ -108,6 +110,7 @@ export function createListingsRouter(db: Database): Router {
           createdAt: listings.createdAt,
           businessId: businesses.id,
           businessName: businesses.name,
+          agrisetaSupported: businesses.agrisetaSupported,
           businessDescription: businesses.description,
           businessProvince: businesses.province,
           businessTown: businesses.town,
@@ -156,6 +159,7 @@ export function createListingsRouter(db: Database): Router {
             contactPhone: normalizeSouthAfricanPhone(row.contactPhone),
             whatsappPhone: normalizeSouthAfricanPhone(row.whatsappPhone),
             verified: true,
+            agrisetaSupported: row.agrisetaSupported,
           },
         },
       });

@@ -8,6 +8,7 @@ import { auditLogs, businesses, categories, listingImages, listings, produceType
 import { searchLocations } from '../geocoding.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { listingTypeForCategory } from '../offerings.js';
 import { missingApplicationDetails, normalizeSouthAfricanPhone } from '../policies.js';
 import type { PrivateStorage, PublicImageStorage } from '../storage.js';
 import { businessSchema, listingCreateSchema, listingUpdateSchema } from '../validation.js';
@@ -21,6 +22,9 @@ const applicationFieldsSchema = z.object({
   categoryId: z.uuid({ message: 'Choose a produce category.' }),
   produceTypeId: z.uuid({ message: 'Choose what your produce is.' }),
   note: z.string().trim().max(1000).optional(),
+  // Multipart fields arrive as text. The admin confirms the claim before any badge is shown.
+  agrisetaSupported: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  agrisetaReference: z.string().trim().max(120).optional(),
 });
 
 // Before approval, produce photos travel inside the seller application. Separate photos can
@@ -422,7 +426,7 @@ export function createSellerRouter(
         description: note.length >= 10 ? note : `${choice.produceTypeName} from ${business.name}${place}.${note ? ` ${note}` : ''}`,
         province: business.province,
         town: business.town,
-        type: choice.categorySlug === 'agricultural-services' ? 'service' : 'product',
+        type: listingTypeForCategory(choice.categorySlug),
       });
       const altText = `${choice.produceTypeName} from ${business.name}`.slice(0, 180);
 
@@ -466,7 +470,13 @@ export function createSellerRouter(
             .returning({ id: verificationSubmissions.id, status: verificationSubmissions.status, submittedAt: verificationSubmissions.submittedAt });
           await transaction
             .update(businesses)
-            .set({ verificationStatus: 'pending', updatedAt: new Date() })
+            .set({
+              verificationStatus: 'pending',
+              agrisetaSupportClaimed: fields.agrisetaSupported,
+              agrisetaReference: fields.agrisetaSupported ? fields.agrisetaReference || null : null,
+              agrisetaSupported: false,
+              updatedAt: new Date(),
+            })
             .where(eq(businesses.id, business.id));
           await transaction.insert(auditLogs).values({
             actorId: request.auth!.id,
