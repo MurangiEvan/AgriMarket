@@ -141,7 +141,51 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return parseResponse<T>(response);
 }
 
-const UPLOAD_TIMEOUT_MS = 120_000;
+// Slow mobile uplinks can need several minutes for a few documents.
+const UPLOAD_TIMEOUT_MS = 240_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The hosted server sleeps when idle and takes up to a minute to wake. Sending a large upload
+// while it is waking can fail, so wake it (and refresh the sign-in) before uploading.
+export async function prepareForUpload(): Promise<void> {
+  const deadline = Date.now() + 75_000;
+  for (;;) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health/ready`, { cache: 'no-store' });
+      if (response.ok) break;
+    } catch {
+      // Not reachable yet; keep trying until the deadline.
+    }
+    if (Date.now() > deadline) throw new ApiError(unreachableMessage(false, API_BASE_URL));
+    await sleep(3000);
+  }
+  // A cheap signed-in request: refreshes an expired access token before the big upload.
+  await apiRequest('/auth/me');
+}
+
+// Sends a multipart upload, retrying when the connection drops (not when the server answers
+// with an error). buildForm is called for every attempt so each one gets a fresh form.
+export async function uploadWithRetry<T>(
+  path: string,
+  buildForm: () => FormData,
+  options: { attempts?: number; alreadyDoneCodes?: string[] } = {},
+): Promise<T | undefined> {
+  const attempts = options.attempts ?? 3;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await apiRequest<T>(path, { method: 'POST', body: buildForm() });
+    } catch (cause) {
+      const connectionLost = cause instanceof ApiError && cause.code === 'NETWORK_ERROR';
+      // If an earlier attempt reached the server but its reply was lost, the server now says
+      // it is already done; treat that as success instead of showing an error.
+      if (attempt > 1 && cause instanceof ApiError && cause.code && options.alreadyDoneCodes?.includes(cause.code)) return undefined;
+      if (!connectionLost || attempt >= attempts) throw cause;
+      await sleep(attempt * 4000);
+      await prepareForUpload().catch(() => undefined);
+    }
+  }
+}
 
 async function performRequest(path: string, init: RequestInit): Promise<Response> {
   ensureSecureApi();
@@ -163,9 +207,9 @@ async function performRequest(path: string, init: RequestInit): Promise<Response
     });
   } catch {
     if (controller?.signal.aborted) {
-      throw new ApiError('The upload is taking too long. Check your internet connection and try again, or choose a smaller file.');
+      throw new ApiError('The upload is taking too long. Check your internet connection and try again, or choose a smaller file.', undefined, 'UPLOAD_TIMEOUT');
     }
-    throw new ApiError(unreachableMessage(upload, API_BASE_URL));
+    throw new ApiError(unreachableMessage(upload, API_BASE_URL), undefined, 'NETWORK_ERROR');
   } finally {
     if (timer) clearTimeout(timer);
   }

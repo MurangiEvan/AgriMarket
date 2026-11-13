@@ -28,7 +28,7 @@ Browser authentication uses opaque server-side sessions in HttpOnly cookies. Tok
 | GET/POST | `/seller/listings` | Seller | List own listings; create a listing only once the business is approved (409 `BUSINESS_NOT_APPROVED` before) |
 | PUT | `/seller/listings/:id` | Owning seller | Update own listing |
 | POST | `/seller/listings/:id/images` | Owning seller | Upload up to five validated listing photos with alt text (approved businesses only) |
-| POST | `/seller/application` | Seller | Submit the whole application in one multipart request: the saved business profile must be complete (name, 10+ character description, town, one contact method), plus `documents` (1–5 PDF/JPEG/PNG, 10 MB each), `photo` (one image, 5 MB), `categoryId`, `produceTypeId` and optional `note`. Creates the verification submission and a pending listing with the photo together |
+| POST | `/seller/application` | Seller | Submit the whole application in one multipart request: the saved business profile must be complete (name, 10+ character description, town, one contact method), plus `documents` (1–5 PDF/JPEG/PNG, 10 MB each), `photo` (one image, up to 25 MB; stored as a 1600 px WebP), `categoryId`, `produceTypeId` and optional `note`. Creates the verification submission and a pending listing with the photo together |
 | GET | `/seller/verification` | Seller | Application status and history; document access remains private |
 | POST | `/seller/verification` | Seller | Retired: returns 409 `APPLICATION_REQUIRED` (use `/seller/application`) |
 | GET | `/seller/enquiries` | Seller | Inbox for own business |

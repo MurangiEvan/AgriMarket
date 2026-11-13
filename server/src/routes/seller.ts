@@ -10,13 +10,14 @@ import { HttpError, asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { listingTypeForCategory } from '../offerings.js';
 import { missingApplicationDetails, normalizeSouthAfricanPhone } from '../policies.js';
-import type { PrivateStorage, PublicImageStorage } from '../storage.js';
+import { MAX_DOCUMENT_BYTES, MAX_LISTING_PHOTO_INPUT_BYTES, type PrivateStorage, type PublicImageStorage } from '../storage.js';
 import { businessSchema, listingCreateSchema, listingUpdateSchema } from '../validation.js';
 
-const MAX_LISTING_PHOTO_BYTES = 5 * 1024 * 1024;
+const MAX_LISTING_PHOTO_BYTES = MAX_LISTING_PHOTO_INPUT_BYTES;
 const listingImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_LISTING_PHOTO_BYTES, files: 5 } });
-// Up to 5 documents (10 MB each) plus one produce photo (5 MB, checked in the route).
-const applicationUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 6 } });
+// Up to 5 documents (10 MB each, checked in the route) plus one photo (25 MB). Multer's per-file
+// cap is the larger photo limit; documents are checked against their own limit below.
+const applicationUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_LISTING_PHOTO_INPUT_BYTES, files: 6 } });
 
 const applicationFieldsSchema = z.object({
   categoryId: z.uuid({ message: 'Choose a produce category.' }),
@@ -402,7 +403,9 @@ export function createSellerRouter(
       }
       if (documents.length === 0) throw new HttpError(400, 'DOCUMENTS_REQUIRED', 'Add at least one verification document, such as your CIPC registration certificate.');
       if (!photo) throw new HttpError(400, 'PHOTO_REQUIRED', 'Add a photo of your produce.');
-      if (photo.size > MAX_LISTING_PHOTO_BYTES) throw new HttpError(413, 'FILE_TOO_LARGE', 'The produce photo must be 5 MB or smaller.');
+      if (photo.size > MAX_LISTING_PHOTO_BYTES) throw new HttpError(413, 'FILE_TOO_LARGE', 'The photo must be 25 MB or smaller.');
+      const oversized = documents.find((document) => document.size > MAX_DOCUMENT_BYTES);
+      if (oversized) throw new HttpError(413, 'FILE_TOO_LARGE', `${oversized.originalname || 'A document'} is larger than 10 MB. Save it at a lower quality or as separate pages.`);
 
       const [choice] = await db
         .select({ produceTypeName: produceTypes.name, categorySlug: categories.slug })

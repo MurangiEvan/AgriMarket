@@ -32,6 +32,14 @@ export type PublicImageStorage = {
   removePublicImage(key: string): Promise<void>;
 };
 
+// Photos may be large camera originals: they are shrunk to a 1600 px WebP before storage, so the
+// stored file stays small. Documents are stored as uploaded, so they keep Cloudinary's free-plan
+// per-file limit. Both are held in memory while processed, so keep them within Render's free RAM.
+export const MAX_LISTING_PHOTO_INPUT_BYTES = 25 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+// About a 50-megapixel photo; larger images are refused instead of exhausting memory.
+const MAX_LISTING_PHOTO_PIXELS = 50_000_000;
+
 const privateDocumentsFolder = 'agrimarket/verification-documents';
 const listingImagesFolder = 'agrimarket/listing-images';
 
@@ -151,8 +159,8 @@ export function createPublicImageStorage(environment: Environment): PublicImageS
     return {
       directory: null,
       async storeListingImage(file) {
-        if (file.size < 1 || file.size > 5 * 1024 * 1024) {
-          throw new HttpError(400, 'INVALID_IMAGE_SIZE', 'Each listing image must be smaller than 5 MB.');
+        if (file.size < 1 || file.size > MAX_LISTING_PHOTO_INPUT_BYTES) {
+          throw new HttpError(400, 'INVALID_IMAGE_SIZE', 'Each listing image must be 25 MB or smaller.');
         }
         const detected = await fileTypeFromBuffer(file.buffer);
         const extension = detected ? allowedImageTypes.get(detected.mime) : undefined;
@@ -162,13 +170,13 @@ export function createPublicImageStorage(environment: Environment): PublicImageS
 
         let optimized: Awaited<ReturnType<ReturnType<typeof sharp>['toBuffer']>>;
         try {
-          optimized = await sharp(file.buffer, { limitInputPixels: 40_000_000 })
+          optimized = await sharp(file.buffer, { limitInputPixels: MAX_LISTING_PHOTO_PIXELS })
             .rotate()
             .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
             .webp({ quality: 82, effort: 4 })
             .toBuffer({ resolveWithObject: true });
         } catch {
-          throw new HttpError(400, 'INVALID_IMAGE', 'The selected image could not be decoded.');
+          throw new HttpError(400, 'INVALID_IMAGE', 'The photo could not be read. Use a JPEG, PNG or WebP photo of up to 50 megapixels.');
         }
 
         const storageKey = `${randomUUID()}.webp`;
@@ -216,8 +224,8 @@ export function createPublicImageStorage(environment: Environment): PublicImageS
   return {
     directory,
     async storeListingImage(file) {
-      if (file.size < 1 || file.size > 5 * 1024 * 1024) {
-        throw new HttpError(400, 'INVALID_IMAGE_SIZE', 'Each listing image must be smaller than 5 MB.');
+      if (file.size < 1 || file.size > MAX_LISTING_PHOTO_INPUT_BYTES) {
+        throw new HttpError(400, 'INVALID_IMAGE_SIZE', 'Each listing image must be 25 MB or smaller.');
       }
       const detected = await fileTypeFromBuffer(file.buffer);
       const extension = detected ? allowedImageTypes.get(detected.mime) : undefined;
@@ -226,13 +234,13 @@ export function createPublicImageStorage(environment: Environment): PublicImageS
       }
       let optimized: Awaited<ReturnType<ReturnType<typeof sharp>['toBuffer']>>;
       try {
-        optimized = await sharp(file.buffer, { limitInputPixels: 40_000_000 })
+        optimized = await sharp(file.buffer, { limitInputPixels: MAX_LISTING_PHOTO_PIXELS })
           .rotate()
           .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 82, effort: 4 })
           .toBuffer({ resolveWithObject: true });
       } catch {
-        throw new HttpError(400, 'INVALID_IMAGE', 'The selected image could not be decoded.');
+        throw new HttpError(400, 'INVALID_IMAGE', 'The photo could not be read. Use a JPEG, PNG or WebP photo of up to 50 megapixels.');
       }
       await mkdir(directory, { recursive: true, mode: 0o755 });
       const storageKey = `${randomUUID()}.webp`;
@@ -279,7 +287,7 @@ export function createPrivateStorage(environment: Environment): PrivateStorage {
     const client = configureCloudinary(environment);
     return {
       async storeVerificationDocument(file) {
-        if (file.size < 1 || file.size > 10 * 1024 * 1024) {
+        if (file.size < 1 || file.size > MAX_DOCUMENT_BYTES) {
           throw new HttpError(400, 'INVALID_FILE_SIZE', 'Each document must be smaller than 10 MB.');
         }
         const detected = await fileTypeFromBuffer(file.buffer);
@@ -329,7 +337,7 @@ export function createPrivateStorage(environment: Environment): PrivateStorage {
 
   return {
     async storeVerificationDocument(file) {
-      if (file.size < 1 || file.size > 10 * 1024 * 1024) {
+      if (file.size < 1 || file.size > MAX_DOCUMENT_BYTES) {
         throw new HttpError(400, 'INVALID_FILE_SIZE', 'Each document must be smaller than 10 MB.');
       }
 

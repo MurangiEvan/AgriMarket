@@ -351,7 +351,7 @@ paths:
               required: [documents, photo, categoryId, produceTypeId]
               properties:
                 documents: { type: array, items: { type: string, format: binary }, minItems: 1, maxItems: 5, description: 'PDF, JPEG or PNG, 10 MB each' }
-                photo: { type: string, format: binary, description: 'JPEG, PNG or WebP, 5 MB' }
+                photo: { type: string, format: binary, description: 'JPEG, PNG or WebP, up to 25 MB (stored as a 1600 px WebP)' }
                 categoryId: { type: string, format: uuid }
                 produceTypeId: { type: string, format: uuid }
                 note: { type: string, maxLength: 1000 }

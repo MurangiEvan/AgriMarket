@@ -6,7 +6,7 @@ import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { ApiError, apiRequest, apiResourceUrl, BUYER_ORGANISATION_TYPES, buyerOrganisationLabel, getBuyerProfile, getCategories, getSellerProduceTypes, saveBuyerProfile, type BuyerOrganisationType, type BuyerProfile, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
+import { ApiError, apiRequest, apiResourceUrl, BUYER_ORGANISATION_TYPES, prepareForUpload, uploadWithRetry, buyerOrganisationLabel, getBuyerProfile, getCategories, getSellerProduceTypes, saveBuyerProfile, type BuyerOrganisationType, type BuyerProfile, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
 import { categoryColor, categoryIcon, produceIcon, SERVICE_CATEGORY_SLUGS } from '@/constants/produce-icons';
 import { greeting, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
@@ -30,7 +30,8 @@ type BusinessProfile = {
 type SellerListing = { id: string; title: string; description: string; categoryId: string; produceTypeId: string; active: boolean; inStock: boolean; expiresAt: string | null; type: 'product' | 'service'; town: string | null; status: string; province: string; images?: { id: string; altText: string; url: string }[] };
 type Verification = { verificationStatus: string; submissions: { id: string; status: string; sellerFeedback: string | null; submittedAt: string }[] };
 type NativeUploadFile = { uri: string; name: string; type: string };
-type ListingPhotoDraft = NativeUploadFile & { file?: File };
+type ListingPhotoDraft = NativeUploadFile & { file?: File; size?: number };
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 
 const MAX_DOCUMENTS = 5;
 
@@ -70,7 +71,7 @@ function pickWebFiles(accept: string, multiple: boolean, onPicked: (files: File[
   picker.click();
 }
 
-// Phone camera photos are often 4–12 MB, above the server's 5 MB limit, and slow on mobile data.
+// Phone camera photos are often 4–12 MB and slow to send on mobile data.
 // The server stores listing photos at up to 1600 px anyway, so shrink to that size first and
 // save as JPEG. That is usually a few hundred KB.
 const MAX_PHOTO_SIDE = 1600;
@@ -232,6 +233,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   const [applicationDocuments, setApplicationDocuments] = useState<ListingPhotoDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [submittingApplication, setSubmittingApplication] = useState(false);
+  const [uploadStage, setUploadStage] = useState('');
   // Optional: the seller says they are AgriSETA-supported; the admin confirms before a badge shows.
   const [agrisetaClaim, setAgrisetaClaim] = useState(false);
   const [agrisetaReference, setAgrisetaReference] = useState('');
@@ -343,6 +345,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     const place = business.town ? ` in ${business.town}` : '';
     await runAction(async () => {
       // Each photo is stored as a listing so it appears in the buyer market under its produce type.
+      await prepareForUpload();
       const created = await apiRequest<{ listing: { id: string } }>('/seller/listings', {
         method: 'POST',
         body: JSON.stringify({
@@ -399,8 +402,12 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   }
 
 
-  function addApplicationDocuments(files: ListingPhotoDraft[]) {
+  function addApplicationDocuments(picked: ListingPhotoDraft[]) {
     setError('');
+    // Check sizes on the phone so a seller is not left waiting for an upload the server will refuse.
+    const tooLarge = picked.filter((file) => (file.size ?? 0) > MAX_DOCUMENT_BYTES);
+    const files = picked.filter((file) => (file.size ?? 0) <= MAX_DOCUMENT_BYTES);
+    if (tooLarge.length) setError(`${tooLarge.map((file) => file.name).join(', ')} ${tooLarge.length === 1 ? 'is' : 'are'} larger than 10 MB. Scan or save ${tooLarge.length === 1 ? 'it' : 'them'} at a lower quality, or as separate pages.`);
     setApplicationDocuments((current) => {
       const combined = [...current, ...files];
       if (combined.length > MAX_DOCUMENTS) setError(`You can add up to ${MAX_DOCUMENTS} documents. Remove one to add another.`);
@@ -411,7 +418,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
   async function chooseDocuments() {
     if (Platform.OS === 'web') {
       pickWebFiles('application/pdf,image/jpeg,image/png', true, (files) => {
-        addApplicationDocuments(files.map((file) => ({ uri: '', name: file.name, type: file.type || 'application/pdf', file })));
+        addApplicationDocuments(files.map((file) => ({ uri: '', name: file.name, type: file.type || 'application/pdf', file, size: file.size })));
       });
       return;
     }
@@ -426,7 +433,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
       addApplicationDocuments(selection.assets.map((file) => {
         const extension = file.name.split('.').pop()?.toLowerCase();
         const fallbackMimeType = extension === 'pdf' ? 'application/pdf' : extension === 'png' ? 'image/png' : 'image/jpeg';
-        return { uri: file.uri, name: file.name, type: file.mimeType ?? fallbackMimeType };
+        return { uri: file.uri, name: file.name, type: file.mimeType ?? fallbackMimeType, size: file.size };
       }));
     } catch {
       setError('The document picker could not be opened. Try again or choose another file.');
@@ -442,27 +449,35 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     }
     const photo = listingPhotoDraft;
     await runAction(async () => {
+      setUploadStage('Connecting to AgriMarket…');
+      await prepareForUpload();
       await apiRequest('/seller/business', {
         method: 'PUT',
         body: JSON.stringify({ name, description, address: address || null, province, town: town || null, contactEmail: contactEmail || null, contactPhone: contactPhone || null, whatsappPhone: whatsappPhone || null }),
       });
-      const form = new FormData();
-      for (const document of applicationDocuments) {
-        if (document.file) form.append('documents', document.file, document.name);
-        else appendNativeUpload(form, 'documents', document);
-      }
-      if (photo.file) form.append('photo', photo.file, photo.name);
-      else appendNativeUpload(form, 'photo', photo);
-      form.append('categoryId', categoryId);
-      form.append('produceTypeId', produceTypeId);
-      if (photoNote.trim()) form.append('note', photoNote.trim());
-      form.append('agrisetaSupported', agrisetaClaim ? 'true' : 'false');
-      if (agrisetaClaim && agrisetaReference.trim()) form.append('agrisetaReference', agrisetaReference.trim());
-      await apiRequest('/seller/application', { method: 'POST', body: form });
+      // Built fresh for each attempt, because an upload may be retried after a dropped connection.
+      const buildForm = () => {
+        const form = new FormData();
+        for (const document of applicationDocuments) {
+          if (document.file) form.append('documents', document.file, document.name);
+          else appendNativeUpload(form, 'documents', { uri: document.uri, name: document.name, type: document.type });
+        }
+        if (photo.file) form.append('photo', photo.file, photo.name);
+        else appendNativeUpload(form, 'photo', { uri: photo.uri, name: photo.name, type: photo.type });
+        form.append('categoryId', categoryId);
+        form.append('produceTypeId', produceTypeId);
+        if (photoNote.trim()) form.append('note', photoNote.trim());
+        form.append('agrisetaSupported', agrisetaClaim ? 'true' : 'false');
+        if (agrisetaClaim && agrisetaReference.trim()) form.append('agrisetaReference', agrisetaReference.trim());
+        return form;
+      };
+      setUploadStage('Sending your documents and photo…');
+      // APPLICATION_PENDING on a retry means an earlier attempt already got through.
+      await uploadWithRetry('/seller/application', buildForm, { alreadyDoneCodes: ['APPLICATION_PENDING'] });
       setApplicationDocuments([]);
       setListingPhotoDraft(null);
       setPhotoNote('');
-    }, 'Application submitted. The admin will review your details, documents and photo together, and you will get a notification with the result.', setSubmittingApplication);
+    }, 'Application submitted. The admin will review your details, documents and photo together, and you will get a notification with the result.', (value) => { setSubmittingApplication(value); if (!value) setUploadStage(''); });
   }
 
   // Category, produce type, photo and note: used for the application photo and, after approval, for extra photos.
@@ -481,7 +496,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
           <Pressable accessibilityRole="button" onPress={() => setListingPhotoDraft(null)} style={styles.smallButton}><Text style={styles.smallButtonText}>Choose a different photo</Text></Pressable>
         </View>
       </View> : <Pressable accessibilityRole="button" disabled={busy || submittingApplication} onPress={() => void chooseNewListingPhoto()} style={styles.secondaryButton}><Text style={styles.secondaryText}>Choose photo</Text></Pressable>}
-      <Text style={styles.helper}>JPEG, PNG or WebP. A clear, well-lit photo helps buyers.</Text>
+      <Text style={styles.helper}>JPEG, PNG or WebP, up to 25 MB. A clear, well-lit photo helps buyers.</Text>
       <Text style={styles.fieldLabel}>Short description for buyers (optional)</Text>
       <TextInput accessibilityLabel="Short note for buyers" placeholder="e.g. Fresh Roma tomatoes in 10 kg boxes every week, or: drone spraying within 50 km of Tzaneen" placeholderTextColor="#7a877f" multiline value={photoNote} onChangeText={setPhotoNote} style={[styles.input, styles.multiline]} />
     </>
@@ -559,7 +574,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
             ))}
           </View>
           <Pressable accessibilityRole="button" disabled={!applicationReady || submittingApplication} onPress={() => void submitApplication()} style={[styles.primaryButton, (!applicationReady || submittingApplication) && styles.disabled]}>
-            <Text style={styles.primaryText}>{submittingApplication ? 'Submitting application…' : applicationStatus === 'rejected' ? 'Submit application again' : 'Submit application'}</Text>
+            <Text style={styles.primaryText}>{submittingApplication ? uploadStage || 'Submitting application…' : applicationStatus === 'rejected' ? 'Submit application again' : 'Submit application'}</Text>
           </Pressable>
         </>
       ) : null}
