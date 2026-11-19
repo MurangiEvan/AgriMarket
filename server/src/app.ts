@@ -70,20 +70,31 @@ export function createApplication(
   });
   app.use(requireTrustedOrigin(allowedOrigins, allowLocalDevelopmentOrigins));
 
+  const authRateLimitHandler = (_request: express.Request, response: express.Response) => {
+    response.status(429).json({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Too many authentication attempts. Please wait and try again.',
+        details: [],
+      },
+    });
+  };
+  // Only failed sign-ins and sign-ups count, so normal use never locks anyone out.
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
+    skipSuccessfulRequests: true,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
-    handler: (_request, response) => {
-      response.status(429).json({
-        error: {
-          code: 'RATE_LIMITED',
-          message: 'Too many authentication attempts. Please wait and try again.',
-          details: [],
-        },
-      });
-    },
+    handler: authRateLimitHandler,
+  });
+  // Apps try a silent session refresh on every page load, so refresh gets its own, larger budget.
+  const refreshLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: authRateLimitHandler,
   });
   const passwordResetLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -131,7 +142,7 @@ export function createApplication(
 
   app.use('/api/v1/auth/register', authLimiter);
   app.use('/api/v1/auth/login', authLimiter);
-  app.use('/api/v1/auth/refresh', authLimiter);
+  app.use('/api/v1/auth/refresh', refreshLimiter);
   app.use('/api/v1/auth/password-reset', passwordResetLimiter);
   app.use('/api/v1/auth', createAuthRouter(db, environment.COOKIE_SECURE, environment.SESSION_SECRET, {
     mailer,
