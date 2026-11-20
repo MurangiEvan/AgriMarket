@@ -12,3 +12,10 @@ export const SERVICE_CATEGORY_SLUGS = new Set([
 export function listingTypeForCategory(slug: string): 'product' | 'service' {
   return SERVICE_CATEGORY_SLUGS.has(slug) ? 'service' : 'product';
 }
+
+// Drone work is regulated by the South African Civil Aviation Authority (SACAA).
+export const DRONE_CATEGORY_SLUG = 'drone-services';
+
+export function isDroneCategory(slug: string | null | undefined): boolean {
+  return slug === DRONE_CATEGORY_SLUG;
+}

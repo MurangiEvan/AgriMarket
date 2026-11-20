@@ -10,7 +10,8 @@ import { buyerProfileSchema, locationSearchQuerySchema, savedLocationSchema } fr
 
 export function createBuyerRouter(db: Database, sessionSecret: string, googleMapsApiKey?: string): Router {
   const router = Router();
-  router.use(requireAuth(db, sessionSecret), requireRole('buyer'));
+  // Sellers can buy too (one account, both roles); only administrators are kept out.
+  router.use(requireAuth(db, sessionSecret), requireRole('buyer', 'seller'));
 
   router.get(
     '/location',

@@ -14,6 +14,7 @@ import { categories, produceTypes } from './db/schema.js';
 import { errorHandler, HttpError } from './http.js';
 import { createMailer, type Mailer } from './mailer.js';
 import { isTrustedOrigin, requireTrustedOrigin } from './middleware/auth.js';
+import { createAccountRouter } from './routes/account.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createBuyerRouter } from './routes/buyer.js';
@@ -22,6 +23,7 @@ import { createPublicImagesRouter } from './routes/images.js';
 import { createListingsRouter } from './routes/listings.js';
 import { createMarketRouter } from './routes/market.js';
 import { createNotificationsRouter } from './routes/notifications.js';
+import { createReportsRouter } from './routes/reports.js';
 import { createSellerRouter } from './routes/seller.js';
 import { createPrivateStorage, createPublicImageStorage } from './storage.js';
 
@@ -123,6 +125,12 @@ export function createApplication(
     standardHeaders: 'draft-8',
     legacyHeaders: false,
   });
+  const reportLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
   const locationSearchLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     limit: 30,
@@ -172,8 +180,10 @@ export function createApplication(
   app.use('/api/v1/seller', createSellerRouter(db, storage, imageStorage, environment.SESSION_SECRET, environment.GOOGLE_MAPS_API_KEY));
   app.use('/api/v1/enquiries', enquiryLimiter, createBuyerEnquiriesRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/seller/enquiries', createSellerEnquiriesRouter(db, environment.SESSION_SECRET));
-  app.use('/api/v1/admin', createAdminRouter(db, storage, environment.SESSION_SECRET));
+  app.use('/api/v1/admin', createAdminRouter(db, storage, environment.SESSION_SECRET, { imageStorage, mailer }));
+  app.use('/api/v1/account', createAccountRouter(db, environment.SESSION_SECRET));
   app.use('/api/v1/notifications', createNotificationsRouter(db, environment.SESSION_SECRET));
+  app.use('/api/v1/reports', reportLimiter, createReportsRouter(db, environment.SESSION_SECRET));
 
   if (environment.WEB_APP_DIR) {
     // Serve the exported Expo web app from the same origin as the API (single Render service).

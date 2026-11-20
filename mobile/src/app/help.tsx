@@ -27,6 +27,14 @@ const sections: Section[] = [
         a: 'Produce, livestock, processed products, and services: agricultural services, equipment hire and repairs, drone services, logistics and transport, and consulting and training. Choose the category that fits and add a photo that shows what you offer.',
       },
       {
+        q: 'Can I buy and sell with one account?',
+        a: 'Yes. A seller account can also buy: use Near me or Search, and send enquiries to other suppliers (not to your own business). Your Enquiries page then has "Received from buyers" and "Sent by you". If you signed up as a buyer, open your Profile and choose "I want to sell" to start selling with the same account.',
+      },
+      {
+        q: 'What do I need to offer drone services?',
+        a: 'Commercial drone work in South Africa needs a Remote Pilot Licence (RPL) and a Remote Operating Certificate (ROC) from the South African Civil Aviation Authority (SACAA). When you choose "Drone services", enter both numbers and upload a copy of your licence with your documents. An administrator checks the licence before your drone listing goes live, and buyers then see "SACAA licence checked". Spraying from a drone has extra legal requirements: only offer it if you are allowed to.',
+      },
+      {
         q: 'What does the AgriSETA-supported badge mean?',
         a: 'If AgriSETA has supported your business (for example through a learnership, skills programme or grant), tick the AgriSETA box on your application and add the programme or reference. The admin checks it before buyers see the badge, and buyers can filter the directory to AgriSETA-supported businesses.',
       },
@@ -90,7 +98,11 @@ const sections: Section[] = [
       },
       {
         q: 'How do I delete my account?',
-        a: 'Contact support from the email address linked to your account and ask for it to be deleted.',
+        a: 'Open your Profile page and use "Delete my account" at the bottom. An administrator checks for open reports or disputes and then deletes it. Your personal details, documents and photos are removed and your listings are taken down. You can cancel while the request is waiting. The Privacy notice explains what is kept.',
+      },
+      {
+        q: 'Where can I read the Privacy notice and Terms of use?',
+        a: 'Both are linked from the sign-up page and from your Profile page. They explain what AgriMarket keeps about you, who can see it, your rights under POPIA, and the rules for buying and selling.',
       },
     ],
   },
@@ -109,7 +121,11 @@ const sections: Section[] = [
       },
       {
         q: 'How do I report a suspicious seller or listing?',
-        a: 'Email support with the business name, the listing and what happened. An administrator will look into it.',
+        a: 'Open the listing and tap "Report this listing" below the supplier details. Choose what is wrong and add what happened. You need to be signed in. An administrator reviews every report and can take the listing down. The seller is never told who reported them.',
+      },
+      {
+        q: 'How do I spot a scam?',
+        a: 'Be careful if someone asks for a deposit or full payment before you have seen the goods, pushes you to decide quickly, offers prices far below the market, or asks you to pay into a personal account that does not match the business name. AgriMarket never asks for payment, banking details or your password.',
       },
     ],
   },

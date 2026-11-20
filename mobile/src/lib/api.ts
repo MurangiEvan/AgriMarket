@@ -43,6 +43,11 @@ export type ListingSummary = {
   categorySlug: string;
   categoryName: string;
   image: { id: string; altText: string; url: string } | null;
+  // True when an administrator has checked the business's SACAA drone licence.
+  droneLicenceVerified?: boolean;
+  // Buyers' star ratings of the business. The average stays null until enough ratings exist.
+  ratingCount?: number;
+  ratingAverage?: number | null;
 };
 
 export type ListingDetail = ListingSummary & {
@@ -66,7 +71,13 @@ export type PublicBusiness = {
   whatsappPhone: string | null;
   verified: boolean;
   agrisetaSupported: boolean;
+  droneLicenceVerified?: boolean;
+  ratingCount?: number;
+  ratingAverage?: number | null;
 };
+
+// An approved buyer comment shown on a listing page; buyers are named by organisation type only.
+export type PublicReview = { id: string; stars: number; comment: string; buyerType: string | null; createdAt: string };
 
 // In local development the computer's LAN address changes with the network, so follow the host the app
 // was actually loaded from instead of a fixed IP in .env:
@@ -105,6 +116,8 @@ export type SessionUser = {
   email: string;
   role: 'buyer' | 'seller' | 'admin';
   emailVerifiedAt?: string | null;
+  // False when the user has not accepted the current Privacy notice and Terms yet.
+  privacyAccepted?: boolean;
 };
 
 export class ApiError extends Error {
@@ -362,7 +375,7 @@ export async function getListings(filters: { q?: string; category?: string; prod
 }
 
 export async function getListing(id: string) {
-  return apiRequest<{ listing: ListingDetail; business: PublicBusiness }>(`/listings/${encodeURIComponent(id)}`);
+  return apiRequest<{ listing: ListingDetail; business: PublicBusiness; reviews?: PublicReview[] }>(`/listings/${encodeURIComponent(id)}`);
 }
 
 export async function getCurrentUser(): Promise<SessionUser> {
@@ -382,7 +395,8 @@ export async function signIn(email: string, password: string): Promise<SessionUs
 export async function register(email: string, password: string, role: 'buyer' | 'seller'): Promise<SessionUser> {
   const result = await apiRequest<{ user: SessionUser; accessToken?: string; refreshToken?: string }>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, role }),
+    // The sign-up form only allows submitting once the Privacy notice and Terms box is ticked.
+    body: JSON.stringify({ email, password, role, acceptPrivacy: true }),
   });
   await saveNativeCredentials(result);
   return result.user;
@@ -485,4 +499,107 @@ export async function getBuyerProfile(): Promise<BuyerProfile | null> {
 export async function saveBuyerProfile(profile: BuyerProfile): Promise<BuyerProfile> {
   const result = await apiRequest<{ profile: BuyerProfile }>('/buyer/profile', { method: 'PUT', body: JSON.stringify(profile) });
   return result.profile;
+}
+
+// Reasons a listing can be reported for; the admin website reviews every report.
+export const REPORT_REASONS = [
+  { value: 'scam_or_fraud', label: 'Scam or fraud' },
+  { value: 'fake_business', label: 'Fake business' },
+  { value: 'wrong_information', label: 'Wrong information' },
+  { value: 'offensive', label: 'Offensive content' },
+  { value: 'other', label: 'Something else' },
+] as const;
+
+export type ReportReason = (typeof REPORT_REASONS)[number]['value'];
+
+export async function reportListing(listingId: string, reason: ReportReason, details: string): Promise<void> {
+  await apiRequest('/reports', {
+    method: 'POST',
+    body: JSON.stringify({ targetType: 'listing', targetId: listingId, reason, details }),
+  });
+}
+
+export async function acceptPrivacyNotice(): Promise<void> {
+  await apiRequest('/auth/privacy/accept', { method: 'POST', body: '{}' });
+}
+
+export type DeletionRequest = {
+  id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  reason: string;
+  decisionNote: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+};
+
+export async function getDeletionRequest(): Promise<DeletionRequest | null> {
+  const result = await apiRequest<{ request: DeletionRequest | null }>('/account/deletion-request');
+  return result.request;
+}
+
+export async function requestAccountDeletion(reason: string): Promise<DeletionRequest> {
+  const result = await apiRequest<{ request: DeletionRequest }>('/account/deletion-request', {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+  return result.request;
+}
+
+export async function cancelAccountDeletion(): Promise<void> {
+  await apiRequest('/account/deletion-request', { method: 'DELETE' });
+}
+
+// What came of an enquiry. The seller records it when closing; values are rough ranges only.
+export type EnquiryOutcome = 'deal_made' | 'no_deal';
+export const DEAL_VALUE_BANDS = [
+  { value: 'under_5k', label: 'Under R5 000' },
+  { value: '5k_50k', label: 'R5 000 – R50 000' },
+  { value: '50k_250k', label: 'R50 000 – R250 000' },
+  { value: 'over_250k', label: 'Over R250 000' },
+  { value: 'prefer_not_to_say', label: 'Rather not say' },
+] as const;
+export type DealValueBand = (typeof DEAL_VALUE_BANDS)[number]['value'];
+
+export function outcomeSummary(outcome: EnquiryOutcome | null | undefined, band: DealValueBand | null | undefined): string {
+  if (outcome === 'no_deal') return 'No deal';
+  if (outcome !== 'deal_made') return '';
+  const range = DEAL_VALUE_BANDS.find((item) => item.value === band);
+  return range && range.value !== 'prefer_not_to_say' ? `Deal made · ${range.label}` : 'Deal made';
+}
+
+// A buyer's rating of a supplier, attached to one of their enquiries.
+export type EnquiryRating = { stars: number; comment: string; commentStatus: 'none' | 'pending' | 'approved' | 'hidden'; createdAt: string };
+
+export async function rateSupplier(enquiryId: string, stars: number, comment: string, update: boolean): Promise<EnquiryRating> {
+  const result = await apiRequest<{ rating: EnquiryRating }>(`/enquiries/${encodeURIComponent(enquiryId)}/rating`, {
+    method: update ? 'PUT' : 'POST',
+    body: JSON.stringify({ stars, comment }),
+  });
+  return result.rating;
+}
+
+export type SellerRatings = {
+  ratingCount: number;
+  ratingAverage: number | null;
+  publicFrom: number;
+  isPublic: boolean;
+  pendingComments: number;
+  reviews: PublicReview[];
+};
+
+export async function getSellerRatings(): Promise<SellerRatings> {
+  return apiRequest<SellerRatings>('/seller/enquiries/ratings');
+}
+
+export async function reportRating(ratingId: string, details: string): Promise<void> {
+  await apiRequest('/reports', {
+    method: 'POST',
+    body: JSON.stringify({ targetType: 'rating', targetId: ratingId, reason: 'other', details }),
+  });
+}
+
+// Switch a buyer account to also sell. Sellers keep every buyer ability.
+export async function becomeSeller(): Promise<SessionUser> {
+  const result = await apiRequest<{ user: SessionUser }>('/auth/become-seller', { method: 'POST', body: '{}' });
+  return result.user;
 }

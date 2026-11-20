@@ -1,15 +1,31 @@
-import { and, desc, eq, inArray, like, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, like, lt, ne, or, sql } from 'drizzle-orm';
 import { Router, type Response } from 'express';
 import { z } from 'zod';
 
 import type { Database } from '../db/client.js';
-import { auditLogs, businesses, categories, enquiries, listingImages, listings, users, verificationSubmissions } from '../db/schema.js';
+import { anonymiseAccount } from '../account-deletion.js';
+import { auditLogs, businesses, categories, deletionRequests, enquiries, listingImages, listings, ratings, reports, users, verificationSubmissions } from '../db/schema.js';
 import { toCsv } from '../csv.js';
 import { HttpError, asyncRoute } from '../http.js';
-import { listingNotification, notify, verificationNotification } from '../notifications.js';
+import type { Mailer } from '../mailer.js';
+import { DRONE_CATEGORY_SLUG, isDroneCategory } from '../offerings.js';
+import { dealValueLabel, outcomeLabel } from '../outcomes.js';
+import { assertDroneLicenceConfirmed, assertDroneLicenceOnFile } from '../policies.js';
+import { deletionRejectedNotification, listingNotification, listingTakenDownNotification, notify, verificationNotification } from '../notifications.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import type { PrivateStorage } from '../storage.js';
-import { listingModerationSchema, verificationDecisionSchema } from '../validation.js';
+import type { PrivateStorage, PublicImageStorage } from '../storage.js';
+import {
+  deletionDecisionSchema,
+  deletionListQuerySchema,
+  listingModerationSchema,
+  ratingCommentDecisionSchema,
+  ratingModerationQuerySchema,
+  reportDecisionSchema,
+  reportListQuerySchema,
+  verificationDecisionSchema,
+} from '../validation.js';
+
+export type AdminRouterOptions = { imageStorage?: PublicImageStorage; mailer?: Mailer };
 
 const queueQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
@@ -25,7 +41,7 @@ const auditQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-export function createAdminRouter(db: Database, storage: PrivateStorage, sessionSecret: string): Router {
+export function createAdminRouter(db: Database, storage: PrivateStorage, sessionSecret: string, options: AdminRouterOptions = {}): Router {
   const router = Router();
   router.use(requireAuth(db, sessionSecret), requireRole('admin'));
 
@@ -50,6 +66,9 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           agrisetaSupportClaimed: businesses.agrisetaSupportClaimed,
           agrisetaReference: businesses.agrisetaReference,
           agrisetaSupported: businesses.agrisetaSupported,
+          sacaaRplNumber: businesses.sacaaRplNumber,
+          sacaaRocNumber: businesses.sacaaRocNumber,
+          droneLicenceVerified: businesses.droneLicenceVerified,
         })
         .from(verificationSubmissions)
         .innerJoin(businesses, eq(verificationSubmissions.businessId, businesses.id))
@@ -68,19 +87,27 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
               title: listings.title,
               description: listings.description,
               status: listings.status,
+              categorySlug: categories.slug,
               imageId: sql<string | null>`(select ${listingImages.id} from ${listingImages} where ${listingImages.listingId} = ${listings.id} order by ${listingImages.sortOrder} limit 1)`,
             })
             .from(listings)
+            .innerJoin(categories, eq(listings.categoryId, categories.id))
             .where(and(inArray(listings.businessId, businessIds), inArray(listings.status, ['pending', 'published', 'rejected'])))
             .orderBy(desc(listings.createdAt))
         : [];
-      const photosByBusiness = new Map<string, Array<{ listingId: string; title: string; description: string; status: string; imageUrl: string | null }>>();
+      const photosByBusiness = new Map<string, Array<{ listingId: string; title: string; description: string; status: string; categorySlug: string; imageUrl: string | null }>>();
       for (const { businessId, imageId, ...photo } of photoRows) {
         const list = photosByBusiness.get(businessId) ?? [];
         if (list.length < 5) list.push({ ...photo, imageUrl: imageId ? `/api/v1/media/listings/${imageId}` : null });
         photosByBusiness.set(businessId, list);
       }
-      response.json({ data: rows.map((row) => ({ ...row, photos: photosByBusiness.get(row.businessId) ?? [] })) });
+      response.json({
+        data: rows.map((row) => {
+          const photos = photosByBusiness.get(row.businessId) ?? [];
+          // Drone applications need the admin to check the SACAA licence before approving.
+          return { ...row, photos, offersDroneServices: photos.some((photo) => isDroneCategory(photo.categorySlug)) };
+        }),
+      });
     }),
   );
 
@@ -101,6 +128,9 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
             businessName: businesses.name,
             ownerId: businesses.ownerId,
             agrisetaSupportClaimed: businesses.agrisetaSupportClaimed,
+            droneLicenceVerified: businesses.droneLicenceVerified,
+            sacaaRplNumber: businesses.sacaaRplNumber,
+            sacaaRocNumber: businesses.sacaaRocNumber,
           })
           .from(verificationSubmissions)
           .innerJoin(businesses, eq(verificationSubmissions.businessId, businesses.id))
@@ -108,6 +138,21 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           .limit(1)
           .for('update', { of: verificationSubmissions });
         if (!submission) throw new HttpError(409, 'DECISION_ALREADY_RECORDED', 'This verification submission is no longer pending.');
+
+        // Approving publishes the application's listings, so a drone offering needs the licence checked.
+        const pendingDrone = input.decision === 'approved'
+          ? await transaction
+              .select({ id: listings.id })
+              .from(listings)
+              .innerJoin(categories, eq(listings.categoryId, categories.id))
+              .where(and(eq(listings.businessId, submission.businessId), eq(listings.status, 'pending'), eq(categories.slug, DRONE_CATEGORY_SLUG)))
+              .limit(1)
+          : [];
+        const confirmingDrone = pendingDrone.length > 0;
+        if (confirmingDrone) {
+          assertDroneLicenceOnFile(submission);
+          assertDroneLicenceConfirmed(true, submission.droneLicenceVerified, input.confirmDroneLicence);
+        }
 
         const reviewedAt = new Date();
         const [updated] = await transaction
@@ -128,6 +173,7 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           .set({
             verificationStatus: input.decision,
             agrisetaSupported: input.decision === 'approved' && input.confirmAgriseta && submission.agrisetaSupportClaimed,
+            ...(confirmingDrone ? { droneLicenceVerified: true } : {}),
             updatedAt: reviewedAt,
           })
           .where(eq(businesses.id, submission.businessId));
@@ -137,7 +183,7 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           action: `verification.${input.decision}`,
           targetType: 'verification_submission',
           targetId: submission.id,
-          metadata: { businessId: submission.businessId },
+          metadata: { businessId: submission.businessId, droneLicenceConfirmed: confirmingDrone },
         });
 
         // The produce photo arrived inside the application and was reviewed with it: approving the
@@ -210,17 +256,23 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           businessId: businesses.id,
           businessName: businesses.name,
           verificationStatus: businesses.verificationStatus,
+          categorySlug: categories.slug,
+          sacaaRplNumber: businesses.sacaaRplNumber,
+          sacaaRocNumber: businesses.sacaaRocNumber,
+          droneLicenceVerified: businesses.droneLicenceVerified,
           imageId: sql<string | null>`(select ${listingImages.id} from ${listingImages} where ${listingImages.listingId} = ${listings.id} order by ${listingImages.sortOrder} limit 1)`,
         })
         .from(listings)
         .innerJoin(businesses, eq(listings.businessId, businesses.id))
+        .innerJoin(categories, eq(listings.categoryId, categories.id))
         // Photos from businesses still under review are part of their application (Verifications).
         .where(and(eq(listings.status, 'pending'), eq(businesses.verificationStatus, 'approved')))
         .orderBy(desc(listings.updatedAt))
         .limit(query.limit);
       response.json({
-        data: rows.map(({ imageId, ...row }) => ({
+        data: rows.map(({ imageId, categorySlug, ...row }) => ({
           ...row,
+          isDroneService: isDroneCategory(categorySlug),
           imageUrl: imageId ? `/api/v1/media/listings/${imageId}` : null,
         })),
       });
@@ -233,17 +285,42 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
       const listingId = z.uuid().parse(request.params.listingId);
       const input = listingModerationSchema.parse(request.body);
       const [target] = await db
-        .select({ businessId: businesses.id, verificationStatus: businesses.verificationStatus, ownerId: businesses.ownerId, title: listings.title })
+        .select({
+          businessId: businesses.id,
+          verificationStatus: businesses.verificationStatus,
+          ownerId: businesses.ownerId,
+          title: listings.title,
+          categorySlug: categories.slug,
+          droneLicenceVerified: businesses.droneLicenceVerified,
+          sacaaRplNumber: businesses.sacaaRplNumber,
+          sacaaRocNumber: businesses.sacaaRocNumber,
+        })
         .from(listings)
         .innerJoin(businesses, eq(listings.businessId, businesses.id))
+        .innerJoin(categories, eq(listings.categoryId, categories.id))
         .where(eq(listings.id, listingId))
         .limit(1);
       if (!target) throw new HttpError(404, 'NOT_FOUND', 'The listing was not found.');
       if (input.status === 'published' && target.verificationStatus !== 'approved') {
         throw new HttpError(409, 'BUSINESS_NOT_VERIFIED', 'Only listings for approved businesses can be published.');
       }
+      const droneListing = input.status === 'published' && isDroneCategory(target.categorySlug);
+      if (droneListing) {
+        assertDroneLicenceOnFile(target);
+        assertDroneLicenceConfirmed(true, target.droneLicenceVerified, input.confirmDroneLicence);
+      }
 
       const updated = await db.transaction(async (transaction) => {
+        if (droneListing && input.confirmDroneLicence && !target.droneLicenceVerified) {
+          await transaction.update(businesses).set({ droneLicenceVerified: true, updatedAt: new Date() }).where(eq(businesses.id, target.businessId));
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'business.drone_licence_confirmed',
+            targetType: 'business',
+            targetId: target.businessId,
+            metadata: { listingId },
+          });
+        }
         const [listing] = await transaction
           .update(listings)
           .set({ status: input.status, updatedAt: new Date() })
@@ -264,6 +341,315 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
     }),
   );
 
+  // Reports from buyers and sellers about listings that look like scams or are wrong.
+  router.get(
+    '/reports',
+    asyncRoute(async (request, response) => {
+      const { status } = reportListQuerySchema.parse(request.query);
+      const rows = await db
+        .select({
+          id: reports.id,
+          targetType: reports.targetType,
+          targetId: reports.targetId,
+          reason: reports.reason,
+          details: reports.details,
+          status: reports.status,
+          createdAt: reports.createdAt,
+          reviewedAt: reports.reviewedAt,
+          resolutionNote: reports.resolutionNote,
+          reporterEmail: users.email,
+          reporterRole: users.role,
+        })
+        .from(reports)
+        .innerJoin(users, eq(reports.reporterId, users.id))
+        .where(eq(reports.status, status))
+        .orderBy(status === 'open' ? reports.createdAt : desc(reports.reviewedAt))
+        .limit(100);
+      const listingIds = [...new Set(rows.filter((row) => row.targetType === 'listing').map((row) => row.targetId))];
+      const [targets, openCounts] = listingIds.length
+        ? await Promise.all([
+            db
+              .select({
+                id: listings.id,
+                title: listings.title,
+                description: listings.description,
+                status: listings.status,
+                businessId: businesses.id,
+                businessName: businesses.name,
+                town: businesses.town,
+                province: businesses.province,
+              })
+              .from(listings)
+              .innerJoin(businesses, eq(listings.businessId, businesses.id))
+              .where(inArray(listings.id, listingIds)),
+            db
+              .select({ targetId: reports.targetId, count: sql<number>`count(*)::int` })
+              .from(reports)
+              .where(and(eq(reports.status, 'open'), inArray(reports.targetId, listingIds)))
+              .groupBy(reports.targetId),
+          ])
+        : [[], []];
+      const ratingIds = [...new Set(rows.filter((row) => row.targetType === 'rating').map((row) => row.targetId))];
+      const ratingTargets = ratingIds.length
+        ? await db
+            .select({
+              id: ratings.id,
+              stars: ratings.stars,
+              comment: ratings.comment,
+              hidden: ratings.hidden,
+              businessName: businesses.name,
+              createdAt: ratings.createdAt,
+            })
+            .from(ratings)
+            .innerJoin(businesses, eq(ratings.businessId, businesses.id))
+            .where(inArray(ratings.id, ratingIds))
+        : [];
+      const targetById = new Map(targets.map((target) => [target.id, target]));
+      const ratingById = new Map(ratingTargets.map((target) => [target.id, target]));
+      const countById = new Map(openCounts.map((row) => [row.targetId, row.count]));
+      response.set('Cache-Control', 'private, no-store');
+      response.json({
+        data: rows.map((row) => ({
+          ...row,
+          listing: row.targetType === 'listing' ? targetById.get(row.targetId) ?? null : null,
+          rating: row.targetType === 'rating' ? ratingById.get(row.targetId) ?? null : null,
+          openReportsOnTarget: countById.get(row.targetId) ?? 0,
+        })),
+      });
+    }),
+  );
+
+  router.post(
+    '/reports/:reportId/decision',
+    asyncRoute(async (request, response) => {
+      const reportId = z.uuid().parse(request.params.reportId);
+      const input = reportDecisionSchema.parse(request.body);
+      const [report] = await db.select().from(reports).where(eq(reports.id, reportId)).limit(1);
+      if (!report) throw new HttpError(404, 'NOT_FOUND', 'The report was not found.');
+      if (report.status !== 'open') throw new HttpError(409, 'ALREADY_REVIEWED', 'This report has already been reviewed.');
+      const now = new Date();
+      const review = { reviewedBy: request.auth!.id, reviewedAt: now, resolutionNote: input.note || null };
+
+      if (input.action === 'dismiss') {
+        await db.transaction(async (transaction) => {
+          await transaction.update(reports).set({ status: 'dismissed', ...review }).where(eq(reports.id, reportId));
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'report.dismissed',
+            targetType: 'report',
+            targetId: reportId,
+            metadata: { reportedType: report.targetType, reportedId: report.targetId, reason: report.reason },
+          });
+        });
+        response.json({ data: { status: 'dismissed' } });
+        return;
+      }
+
+      if (report.targetType === 'rating') {
+        // Hiding a rating removes its stars from the average and its comment from the listing page.
+        await db.transaction(async (transaction) => {
+          await transaction.update(ratings).set({ hidden: true, commentStatus: 'hidden', updatedAt: now }).where(eq(ratings.id, report.targetId));
+          await transaction
+            .update(reports)
+            .set({ status: 'actioned', ...review })
+            .where(and(eq(reports.targetType, 'rating'), eq(reports.targetId, report.targetId), eq(reports.status, 'open')));
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'report.actioned',
+            targetType: 'rating',
+            targetId: report.targetId,
+            metadata: { reportId, reason: report.reason },
+          });
+        });
+        response.json({ data: { status: 'actioned' } });
+        return;
+      }
+      const [target] = await db
+        .select({ title: listings.title, ownerId: businesses.ownerId, businessId: businesses.id })
+        .from(listings)
+        .innerJoin(businesses, eq(listings.businessId, businesses.id))
+        .where(eq(listings.id, report.targetId))
+        .limit(1);
+      if (!target) throw new HttpError(404, 'NOT_FOUND', 'The reported listing no longer exists.');
+
+      // Taking the listing down settles every open report about it, not just this one.
+      await db.transaction(async (transaction) => {
+        await transaction.update(listings).set({ status: 'archived', updatedAt: now }).where(eq(listings.id, report.targetId));
+        await transaction
+          .update(reports)
+          .set({ status: 'actioned', ...review })
+          .where(and(eq(reports.targetType, 'listing'), eq(reports.targetId, report.targetId), eq(reports.status, 'open')));
+        await transaction.insert(auditLogs).values({
+          actorId: request.auth!.id,
+          action: 'report.actioned',
+          targetType: 'listing',
+          targetId: report.targetId,
+          metadata: { reportId, reason: report.reason, businessId: target.businessId },
+        });
+        await notify(transaction, listingTakenDownNotification(target.ownerId, target.title, input.note));
+      });
+      response.json({ data: { status: 'actioned' } });
+    }),
+  );
+
+  // Rating comments wait here before they appear on listing pages. Stars count straight away.
+  router.get(
+    '/ratings',
+    asyncRoute(async (request, response) => {
+      const { commentStatus } = ratingModerationQuerySchema.parse(request.query);
+      const rows = await db
+        .select({
+          id: ratings.id,
+          stars: ratings.stars,
+          comment: ratings.comment,
+          commentStatus: ratings.commentStatus,
+          hidden: ratings.hidden,
+          createdAt: ratings.createdAt,
+          updatedAt: ratings.updatedAt,
+          businessName: businesses.name,
+          buyerEmail: users.email,
+          buyerType: users.organisationType,
+        })
+        .from(ratings)
+        .innerJoin(businesses, eq(ratings.businessId, businesses.id))
+        .innerJoin(users, eq(ratings.buyerId, users.id))
+        .where(eq(ratings.commentStatus, commentStatus))
+        .orderBy(commentStatus === 'pending' ? ratings.updatedAt : desc(ratings.updatedAt))
+        .limit(100);
+      response.set('Cache-Control', 'private, no-store');
+      response.json({ data: rows });
+    }),
+  );
+
+  router.post(
+    '/ratings/:ratingId/comment',
+    asyncRoute(async (request, response) => {
+      const ratingId = z.uuid().parse(request.params.ratingId);
+      const { action } = ratingCommentDecisionSchema.parse(request.body);
+      const [rating] = await db.select({ comment: ratings.comment, hidden: ratings.hidden }).from(ratings).where(eq(ratings.id, ratingId)).limit(1);
+      if (!rating) throw new HttpError(404, 'NOT_FOUND', 'The rating was not found.');
+      if (!rating.comment) throw new HttpError(409, 'NO_COMMENT', 'This rating has no comment to review.');
+      if (rating.hidden && action === 'approve') throw new HttpError(409, 'RATING_HIDDEN', 'This rating was hidden after a report and cannot be shown.');
+      const commentStatus = action === 'approve' ? 'approved' : 'hidden';
+      await db.transaction(async (transaction) => {
+        await transaction.update(ratings).set({ commentStatus, updatedAt: new Date() }).where(eq(ratings.id, ratingId));
+        await transaction.insert(auditLogs).values({
+          actorId: request.auth!.id,
+          action: action === 'approve' ? 'rating.comment_approved' : 'rating.comment_hidden',
+          targetType: 'rating',
+          targetId: ratingId,
+          metadata: {},
+        });
+      });
+      response.json({ data: { commentStatus } });
+    }),
+  );
+
+  // Deletion requests: the admin checks for open reports or disputes, then approves (anonymises
+  // the account) or rejects with a reason the user can read.
+  router.get(
+    '/deletion-requests',
+    asyncRoute(async (request, response) => {
+      const { status } = deletionListQuerySchema.parse(request.query);
+      const rows = await db
+        .select({
+          id: deletionRequests.id,
+          userId: deletionRequests.userId,
+          reason: deletionRequests.reason,
+          status: deletionRequests.status,
+          decisionNote: deletionRequests.decisionNote,
+          createdAt: deletionRequests.createdAt,
+          reviewedAt: deletionRequests.reviewedAt,
+          email: users.email,
+          role: users.role,
+          memberSince: users.createdAt,
+        })
+        .from(deletionRequests)
+        .innerJoin(users, eq(deletionRequests.userId, users.id))
+        .where(eq(deletionRequests.status, status))
+        .orderBy(status === 'pending' ? deletionRequests.createdAt : desc(deletionRequests.reviewedAt))
+        .limit(100);
+      const userIds = rows.map((row) => row.userId);
+      const [ownedBusinesses, reportCounts] = userIds.length
+        ? await Promise.all([
+            db
+              .select({ ownerId: businesses.ownerId, name: businesses.name, verificationStatus: businesses.verificationStatus })
+              .from(businesses)
+              .where(inArray(businesses.ownerId, userIds)),
+            // Open reports against this user's listings: a reason to look closer before approving.
+            db
+              .select({ ownerId: businesses.ownerId, count: sql<number>`count(*)::int` })
+              .from(reports)
+              .innerJoin(listings, and(eq(reports.targetType, 'listing'), eq(reports.targetId, listings.id)))
+              .innerJoin(businesses, eq(listings.businessId, businesses.id))
+              .where(and(eq(reports.status, 'open'), inArray(businesses.ownerId, userIds)))
+              .groupBy(businesses.ownerId),
+          ])
+        : [[], []];
+      const businessByOwner = new Map(ownedBusinesses.map((business) => [business.ownerId, business]));
+      const reportsByOwner = new Map(reportCounts.map((row) => [row.ownerId, row.count]));
+      response.set('Cache-Control', 'private, no-store');
+      response.json({
+        data: rows.map((row) => ({
+          ...row,
+          business: businessByOwner.get(row.userId) ?? null,
+          openReportsAgainstUser: reportsByOwner.get(row.userId) ?? 0,
+        })),
+      });
+    }),
+  );
+
+  router.post(
+    '/deletion-requests/:requestId/decision',
+    asyncRoute(async (request, response) => {
+      const requestId = z.uuid().parse(request.params.requestId);
+      const input = deletionDecisionSchema.parse(request.body);
+      const [deletion] = await db.select().from(deletionRequests).where(eq(deletionRequests.id, requestId)).limit(1);
+      if (!deletion) throw new HttpError(404, 'NOT_FOUND', 'The deletion request was not found.');
+      if (deletion.status !== 'pending') throw new HttpError(409, 'ALREADY_REVIEWED', 'This request has already been reviewed or was cancelled.');
+      const review = { reviewedBy: request.auth!.id, reviewedAt: new Date(), decisionNote: input.note || null };
+
+      if (input.decision === 'rejected') {
+        await db.transaction(async (transaction) => {
+          await transaction.update(deletionRequests).set({ status: 'rejected', ...review }).where(eq(deletionRequests.id, requestId));
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'user.deletion_rejected',
+            targetType: 'user',
+            targetId: deletion.userId,
+            metadata: { requestId },
+          });
+          await notify(transaction, deletionRejectedNotification(deletion.userId, input.note));
+        });
+        response.json({ data: { status: 'rejected' } });
+        return;
+      }
+
+      const removed = await db.transaction(async (transaction) => {
+        await transaction.update(deletionRequests).set({ status: 'approved', ...review }).where(eq(deletionRequests.id, requestId));
+        const result = await anonymiseAccount(transaction, deletion.userId);
+        await transaction.insert(auditLogs).values({
+          actorId: request.auth!.id,
+          action: 'user.deleted',
+          targetType: 'user',
+          targetId: deletion.userId,
+          metadata: { requestId, documentsRemoved: result.documentKeys.length, photosRemoved: result.imageKeys.length },
+        });
+        return result;
+      });
+
+      // Files and the confirmation email come after the commit; a failure here never undoes the deletion.
+      await Promise.allSettled([
+        ...removed.documentKeys.map((key) => storage.removePrivateObject(key)),
+        ...removed.imageKeys.map((key) => options.imageStorage?.removePublicImage(key)),
+      ]);
+      await options.mailer?.sendAccountDeleted(removed.originalEmail).catch(() => {
+        console.error('Account deleted confirmation email could not be sent');
+      });
+      response.json({ data: { status: 'approved' } });
+    }),
+  );
+
   router.get(
     '/overview',
     asyncRoute(async (_request, response) => {
@@ -280,13 +666,34 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           .groupBy(listings.status),
         db.select({ role: users.role, count }).from(users).where(eq(users.isActive, true)).groupBy(users.role),
       ]);
-      const [buyerTypeRows, agrisetaRows] = await Promise.all([
+      const [ratingRows, pendingCommentRows] = await Promise.all([
+        db
+          .select({ total: count, satisfied: sql<number>`count(*) filter (where ${ratings.stars} >= 4)::int` })
+          .from(ratings)
+          .where(eq(ratings.hidden, false)),
+        db.select({ count }).from(ratings).where(eq(ratings.commentStatus, 'pending')),
+      ]);
+      const ratingTotal = ratingRows[0]?.total ?? 0;
+      const [outcomeRows, valueBandRows] = await Promise.all([
+        db.select({ outcome: enquiries.outcome, count }).from(enquiries).where(isNotNull(enquiries.outcome)).groupBy(enquiries.outcome),
+        db
+          .select({ band: enquiries.outcomeValueBand, count })
+          .from(enquiries)
+          .where(eq(enquiries.outcome, 'deal_made'))
+          .groupBy(enquiries.outcomeValueBand),
+      ]);
+      const dealsMade = outcomeRows.find((row) => row.outcome === 'deal_made')?.count ?? 0;
+      const outcomesRecorded = outcomeRows.reduce((total, row) => total + row.count, 0);
+      const [buyerTypeRows, agrisetaRows, openReportRows, pendingDeletionRows] = await Promise.all([
         db
           .select({ type: users.organisationType, count })
           .from(users)
-          .where(and(eq(users.role, 'buyer'), eq(users.isActive, true)))
+          // Buyers, plus sellers who also buy (they set an organisation before enquiring).
+          .where(and(eq(users.isActive, true), or(eq(users.role, 'buyer'), and(eq(users.role, 'seller'), isNotNull(users.organisationType)))))
           .groupBy(users.organisationType),
         db.select({ count }).from(businesses).where(and(eq(businesses.verificationStatus, 'approved'), eq(businesses.agrisetaSupported, true))),
+        db.select({ count }).from(reports).where(eq(reports.status, 'open')),
+        db.select({ count }).from(deletionRequests).where(eq(deletionRequests.status, 'pending')),
       ]);
       const toRecord = <K extends string>(rows: { key: K; count: number }[]) =>
         Object.fromEntries(rows.map((row) => [row.key, row.count])) as Partial<Record<K, number>>;
@@ -299,6 +706,21 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           // Buyers who have not said who they buy for yet are counted as "not_set".
           buyerTypes: toRecord(buyerTypeRows.map((row) => ({ key: row.type ?? 'not_set', count: row.count }))),
           agrisetaSupportedBusinesses: agrisetaRows[0]?.count ?? 0,
+          openReports: openReportRows[0]?.count ?? 0,
+          pendingDeletionRequests: pendingDeletionRows[0]?.count ?? 0,
+          // Handbook KPI: share of visible ratings with 4 or 5 stars (target above 85%).
+          ratings: {
+            total: ratingTotal,
+            satisfactionScore: ratingTotal ? Math.round(((ratingRows[0]?.satisfied ?? 0) / ratingTotal) * 100) : null,
+            pendingComments: pendingCommentRows[0]?.count ?? 0,
+          },
+          // Outcomes sellers recorded when closing enquiries. dealRate is null until any are recorded.
+          deals: {
+            made: dealsMade,
+            outcomesRecorded,
+            dealRate: outcomesRecorded ? Math.round((dealsMade / outcomesRecorded) * 100) : null,
+            valueBands: toRecord(valueBandRows.map((row) => ({ key: row.band ?? 'not_given', count: row.count }))),
+          },
         },
       });
     }),
@@ -367,6 +789,8 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
           id: enquiries.id,
           createdAt: enquiries.createdAt,
           status: enquiries.status,
+          outcome: enquiries.outcome,
+          outcomeValueBand: enquiries.outcomeValueBand,
           businessName: businesses.name,
           agrisetaSupported: businesses.agrisetaSupported,
           businessProvince: businesses.province,
@@ -384,9 +808,10 @@ export function createAdminRouter(db: Database, storage: PrivateStorage, session
         .limit(10000);
       await db.insert(auditLogs).values({ actorId: request.auth!.id, action: 'export.enquiries', targetType: 'export', targetId: request.auth!.id, metadata: { rows: rows.length } });
       const csv = toCsv(
-        ['Enquiry ID', 'Date', 'Status', 'Seller business', 'Seller AgriSETA-supported', 'Seller province', 'Listing', 'Category', 'Buyer organisation', 'Buyer type'],
+        ['Enquiry ID', 'Date', 'Status', 'Outcome', 'Deal value (ZAR)', 'Seller business', 'Seller AgriSETA-supported', 'Seller province', 'Listing', 'Category', 'Buyer organisation', 'Buyer type'],
         rows.map((row) => [
-          row.id, row.createdAt, row.status, row.businessName, row.agrisetaSupported ? 'Yes' : 'No', row.businessProvince,
+          row.id, row.createdAt, row.status, outcomeLabel(row.outcome), dealValueLabel(row.outcomeValueBand),
+          row.businessName, row.agrisetaSupported ? 'Yes' : 'No', row.businessProvince,
           row.listingTitle, row.category, row.buyerOrganisation, row.buyerType ? buyerTypeLabel(row.buyerType) : '',
         ]),
       );

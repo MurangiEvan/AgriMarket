@@ -14,6 +14,8 @@ import {
   requireAuth,
   SESSION_COOKIE,
 } from '../middleware/auth.js';
+import { assertCanBecomeSeller } from '../policies.js';
+import { hasAcceptedCurrentPrivacy, PRIVACY_VERSION } from '../privacy.js';
 import { ACCESS_TOKEN_TTL_SECONDS, createAccessToken, REFRESH_TOKEN_TTL_MS } from '../session-tokens.js';
 import {
   loginSchema,
@@ -129,12 +131,12 @@ export function createAuthRouter(
       const passwordHash = await hash(input.password, 12);
       const [user] = await db
         .insert(users)
-        .values({ email, passwordHash, role: input.role })
+        .values({ email, passwordHash, role: input.role, privacyAcceptedAt: new Date(), privacyVersion: PRIVACY_VERSION })
         .returning({ id: users.id, email: users.email, role: users.role });
       if (!user) throw new Error('User registration did not return a user.');
       const session = await issueSession(db, user, sessionSecret);
       sendCredentials(response, session, secureCookie, isNativeClient(request));
-      response.status(201).json({ data: credentialsResponse(session, user, isNativeClient(request)) });
+      response.status(201).json({ data: credentialsResponse(session, { ...user, privacyAccepted: true }, isNativeClient(request)) });
     }),
   );
 
@@ -150,6 +152,7 @@ export function createAuthRouter(
           role: users.role,
           isActive: users.isActive,
           passwordHash: users.passwordHash,
+          privacyVersion: users.privacyVersion,
         })
         .from(users)
         .where(eq(users.email, email))
@@ -162,7 +165,7 @@ export function createAuthRouter(
       const session = await issueSession(db, publicUser, sessionSecret);
       const nativeClient = isNativeClient(request);
       sendCredentials(response, session, secureCookie, nativeClient);
-      response.json({ data: credentialsResponse(session, publicUser, nativeClient) });
+      response.json({ data: credentialsResponse(session, { ...publicUser, privacyAccepted: hasAcceptedCurrentPrivacy(user.privacyVersion) }, nativeClient) });
     }),
   );
 
@@ -184,6 +187,7 @@ export function createAuthRouter(
           userId: users.id,
           email: users.email,
           role: users.role,
+          privacyVersion: users.privacyVersion,
         })
         .from(sessions)
         .innerJoin(users, eq(sessions.userId, users.id))
@@ -218,7 +222,13 @@ export function createAuthRouter(
         expiresAt,
       );
       sendCredentials(response, session, secureCookie, nativeClient);
-      response.json({ data: credentialsResponse(session, current, nativeClient) });
+      response.json({
+        data: credentialsResponse(
+          session,
+          { id: current.userId, email: current.email, role: current.role, privacyAccepted: hasAcceptedCurrentPrivacy(current.privacyVersion) },
+          nativeClient,
+        ),
+      });
     }),
   );
 
@@ -237,12 +247,56 @@ export function createAuthRouter(
     requireAuth(db, sessionSecret),
     asyncRoute(async (request, response) => {
       const [user] = await db
-        .select({ id: users.id, email: users.email, role: users.role, emailVerifiedAt: users.emailVerifiedAt })
+        .select({ id: users.id, email: users.email, role: users.role, emailVerifiedAt: users.emailVerifiedAt, privacyVersion: users.privacyVersion })
         .from(users)
         .where(and(eq(users.id, request.auth!.id), eq(users.isActive, true)))
         .limit(1);
       if (!user) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in to continue.');
-      response.json({ data: { user } });
+      const { privacyVersion, ...rest } = user;
+      response.json({ data: { user: { ...rest, privacyAccepted: hasAcceptedCurrentPrivacy(privacyVersion) } } });
+    }),
+  );
+
+  // A buyer starts selling without a second account. Sellers keep every buyer ability, so nothing is
+  // lost; the business still has to apply and be approved before buyers can see it.
+  router.post(
+    '/become-seller',
+    requireAuth(db, sessionSecret),
+    asyncRoute(async (request, response) => {
+      assertCanBecomeSeller(request.auth!.role);
+      const [user] = await db.transaction(async (transaction) => {
+        const updated = await transaction
+          .update(users)
+          .set({ role: 'seller', updatedAt: new Date() })
+          .where(and(eq(users.id, request.auth!.id), eq(users.role, 'buyer')))
+          .returning({ id: users.id, email: users.email, role: users.role, privacyVersion: users.privacyVersion });
+        if (updated.length) {
+          await transaction.insert(auditLogs).values({
+            actorId: request.auth!.id,
+            action: 'user.became_seller',
+            targetType: 'user',
+            targetId: request.auth!.id,
+            metadata: {},
+          });
+        }
+        return updated;
+      });
+      if (!user) throw new HttpError(409, 'ALREADY_SELLER', 'Your account can already sell.');
+      const { privacyVersion, ...rest } = user;
+      response.json({ data: { user: { ...rest, privacyAccepted: hasAcceptedCurrentPrivacy(privacyVersion) } } });
+    }),
+  );
+
+  // Accounts created before the Privacy notice existed (or before it changed) accept it here.
+  router.post(
+    '/privacy/accept',
+    requireAuth(db, sessionSecret),
+    asyncRoute(async (request, response) => {
+      await db
+        .update(users)
+        .set({ privacyAcceptedAt: new Date(), privacyVersion: PRIVACY_VERSION, updatedAt: new Date() })
+        .where(eq(users.id, request.auth!.id));
+      response.json({ data: { privacyAccepted: true, privacyVersion: PRIVACY_VERSION } });
     }),
   );
 
@@ -313,7 +367,7 @@ function sendCredentials(
   });
 }
 
-function credentialsResponse(session: SessionCredentials, user: AuthUser, nativeClient: boolean) {
+function credentialsResponse(session: SessionCredentials, user: AuthUser & { privacyAccepted: boolean }, nativeClient: boolean) {
   return {
     user,
     accessExpiresAt: session.accessExpiresAt,

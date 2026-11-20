@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { enquiryNotification, listingNotification, summarize, verificationNotification } from './notifications.js';
+import { deletionRejectedNotification, enquiryNotification, listingNotification, listingTakenDownNotification, summarize, verificationNotification } from './notifications.js';
 
 const owner = '6f7c2a2e-9d1b-4a35-8c34-1f0f5b1c2d3e';
 
@@ -41,4 +41,20 @@ test('long text is collapsed and shortened for display', () => {
 test('a new enquiry names the buyer organisation when the buyer has given one', () => {
   assert.equal(enquiryNotification(owner, 'Avocados', 'Need 50 kg weekly', 'Protea Hotel Polokwane').title, 'New enquiry from Protea Hotel Polokwane about Avocados');
   assert.equal(enquiryNotification(owner, 'Avocados', 'Need 50 kg weekly', null).title, 'New enquiry about Avocados');
+});
+
+test('a taken-down listing tells the seller why without naming the reporter', () => {
+  const withNote = listingTakenDownNotification(owner, 'Avocados', 'Photos were copied from another farm.');
+  assert.equal(withNote.type, 'listing.taken_down');
+  assert.equal(withNote.title, 'Your Avocados listing was taken down');
+  assert.match(withNote.body ?? '', /Photos were copied/);
+  assert.equal(withNote.link, '/account');
+  assert.match(listingTakenDownNotification(owner, 'Avocados', '').body ?? '', /Contact AgriMarket support/);
+});
+
+test('a rejected deletion request explains the reason on the profile page', () => {
+  const notification = deletionRejectedNotification(owner, 'A fraud report is still open.');
+  assert.equal(notification.type, 'account.deletion_rejected');
+  assert.match(notification.body ?? '', /fraud report is still open/);
+  assert.equal(notification.link, '/account');
 });

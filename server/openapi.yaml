@@ -33,16 +33,87 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [email, password, role]
+              required: [email, password, role, acceptPrivacy]
               properties:
                 email: { type: string, format: email }
                 password: { type: string, minLength: 10, maxLength: 128 }
                 role: { type: string, enum: [buyer, seller] }
+                acceptPrivacy: { type: boolean, enum: [true], description: POPIA consent to the Privacy notice and Terms of use }
       responses:
         '201': { description: Account and session created }
-        '400': { description: Invalid input }
+        '400': { description: Invalid input or Privacy notice not accepted }
         '409': { description: Email already registered }
         '429': { description: Rate limit exceeded }
+  /auth/become-seller:
+    post:
+      summary: Switch a buyer account to seller (one account can buy and sell)
+      responses:
+        '200': { description: The updated user (role seller) }
+        '401': { description: Not signed in }
+        '403': { description: Administrator accounts cannot sell }
+        '409': { description: Already a seller }
+  /auth/privacy/accept:
+    post:
+      summary: Accept the current Privacy notice and Terms of use
+      responses:
+        '200': { description: Accepted; user.privacyAccepted is now true }
+        '401': { description: Not signed in }
+  /account/deletion-request:
+    get:
+      summary: Read the user's latest account deletion request
+      responses:
+        '200': { description: The latest request or null }
+        '401': { description: Not signed in }
+    post:
+      summary: Ask for the account to be deleted (an administrator approves it)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        '201': { description: Request created }
+        '401': { description: Not signed in }
+        '403': { description: Administrator accounts cannot use this }
+        '409': { description: A request is already pending }
+    delete:
+      summary: Cancel a pending deletion request
+      responses:
+        '200': { description: Cancelled }
+        '404': { description: No pending request }
+  /admin/deletion-requests:
+    get:
+      summary: List account deletion requests
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected, cancelled], default: pending } }
+      responses:
+        '200': { description: 'Requests with the user, their business and open reports against them' }
+        '401': { description: Not signed in }
+        '403': { description: Not an administrator }
+  /admin/deletion-requests/{requestId}/decision:
+    post:
+      summary: Approve (anonymise the account) or reject a deletion request
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+                note: { type: string, maxLength: 1000, description: Required when rejecting; shown to the user }
+      responses:
+        '200': { description: Decision saved and audited }
+        '400': { description: Rejection without a note }
+        '404': { description: Request not found }
+        '409': { description: Already reviewed or cancelled }
   /auth/login:
     post:
       security: []
@@ -216,6 +287,24 @@ paths:
       responses:
         '200': { description: Public listing details }
         '404': { description: Not found or not publicly eligible }
+  /seller/business/drone-licence:
+    put:
+      summary: Save the seller's SACAA drone licence numbers (needed for drone services)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sacaaRplNumber, sacaaRocNumber]
+              properties:
+                sacaaRplNumber: { type: string, minLength: 3, maxLength: 40, description: Remote Pilot Licence number as printed }
+                sacaaRocNumber: { type: string, minLength: 3, maxLength: 40, description: Remote Operating Certificate number as printed }
+      responses:
+        '200': { description: 'Saved; changing a number clears droneLicenceVerified' }
+        '400': { description: Invalid number format }
+        '409': { description: No business profile yet }
   /seller/business:
     get:
       summary: Read the signed-in seller's business
@@ -385,8 +474,21 @@ paths:
       summary: Move an owned enquiry forward through allowed statuses
       parameters:
         - { in: path, name: enquiryId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [read, responded, closed] }
+                outcome: { type: string, enum: [deal_made, no_deal], description: Required when status is closed }
+                outcomeValueBand: { type: string, enum: [under_5k, 5k_50k, 50k_250k, over_250k, prefer_not_to_say], description: Optional; only with deal_made }
       responses:
         '200': { description: Enquiry status updated }
+        '400': { description: 'Missing outcome when closing, or a value without a deal' }
         '403': { description: Ownership or role denied }
         '409': { description: Invalid state transition }
   /admin/verifications:
@@ -400,6 +502,7 @@ paths:
       summary: Approve or reject and audit a pending verification submission
       parameters:
         - { in: path, name: verificationId, required: true, schema: { type: string, format: uuid } }
+      description: Approving an application that offers drone services needs confirmDroneLicence true unless the licence was already checked (409 DRONE_LICENCE_NOT_CONFIRMED).
       responses:
         '200': { description: Decision recorded }
         '403': { description: Admin role required }
@@ -423,6 +526,7 @@ paths:
       summary: Publish, reject, or archive a listing with an audit record
       parameters:
         - { in: path, name: listingId, required: true, schema: { type: string, format: uuid } }
+      description: Publishing a drone-services listing needs confirmDroneLicence true the first time for a business (409 DRONE_LICENCE_NOT_CONFIRMED or DRONE_LICENCE_REQUIRED).
       responses:
         '200': { description: Moderation recorded }
         '409': { description: Business is not approved for publication }
@@ -471,6 +575,117 @@ paths:
         '200': { description: 'Counts keyed by status: verifications, businesses, listings, and active users by role' }
         '401': { description: Not signed in }
         '403': { description: Not an administrator }
+  /enquiries/{enquiryId}/rating:
+    post:
+      summary: Rate the supplier for your own enquiry (after the seller responded or closed it)
+      parameters:
+        - { in: path, name: enquiryId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [stars]
+              properties:
+                stars: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string, maxLength: 500 }
+      responses:
+        '201': { description: Rating saved; a comment waits for admin approval }
+        '404': { description: Enquiry not found }
+        '409': { description: NOT_YET_RATEABLE or ALREADY_RATED }
+    put:
+      summary: Change your rating within 30 days
+      parameters:
+        - { in: path, name: enquiryId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Rating updated }
+        '404': { description: No rating yet }
+        '409': { description: EDIT_WINDOW_CLOSED or RATING_HIDDEN }
+  /seller/enquiries/ratings:
+    get:
+      summary: The seller's own ratings, pending comment count and approved comments
+      responses:
+        '200': { description: Ratings summary }
+        '401': { description: Not signed in }
+  /admin/ratings:
+    get:
+      summary: Rating comments to moderate
+      parameters:
+        - { name: commentStatus, in: query, schema: { type: string, enum: [pending, approved, hidden], default: pending } }
+      responses:
+        '200': { description: Rating comments }
+        '403': { description: Not an administrator }
+  /admin/ratings/{ratingId}/comment:
+    post:
+      summary: Approve or hide a rating comment
+      parameters:
+        - { in: path, name: ratingId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [approve, hide] }
+      responses:
+        '200': { description: Decision saved and audited }
+        '409': { description: NO_COMMENT or RATING_HIDDEN }
+  /reports:
+    post:
+      summary: Report a live listing (scam, fake business, wrong information...)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetType, targetId, reason]
+              properties:
+                targetType: { type: string, enum: [listing, rating] }
+                targetId: { type: string, format: uuid }
+                reason: { type: string, enum: [scam_or_fraud, fake_business, wrong_information, offensive, other] }
+                details: { type: string, maxLength: 1000 }
+      responses:
+        '201': { description: Report received }
+        '401': { description: Not signed in }
+        '404': { description: Listing not found or no longer live }
+        '409': { description: OWN_LISTING or ALREADY_REPORTED }
+        '429': { description: Too many reports }
+  /admin/reports:
+    get:
+      summary: List reports for review
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, dismissed, actioned], default: open } }
+      responses:
+        '200': { description: 'Reports with the reported listing, reporter and open-report count' }
+        '401': { description: Not signed in }
+        '403': { description: Not an administrator }
+  /admin/reports/{reportId}/decision:
+    post:
+      summary: Dismiss a report or take the reported listing down
+      parameters:
+        - { name: reportId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [dismiss, take_down] }
+                note: { type: string, maxLength: 1000 }
+      responses:
+        '200': { description: Decision saved and audited }
+        '404': { description: Report or listing not found }
+        '409': { description: Report already reviewed }
 components:
   securitySchemes:
     accessCookie:

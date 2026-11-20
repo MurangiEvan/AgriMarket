@@ -29,9 +29,14 @@ const actionOptions = [
   { value: 'listing.published', label: 'Photo published' },
   { value: 'listing.rejected', label: 'Photo rejected' },
   { value: 'listing.photo_replaced', label: 'Photo replaced' },
+  { value: 'report.', label: 'Report decisions' },
+  { value: 'rating.', label: 'Rating comment decisions' },
+  { value: 'business.drone_licence_confirmed', label: 'SACAA licence checked' },
   { value: 'export.', label: 'Data exports' },
   { value: 'user.', label: 'All account events' },
   { value: 'user.password_reset', label: 'Password reset' },
+  { value: 'user.deletion', label: 'Account deletion requests' },
+  { value: 'user.deleted', label: 'Accounts deleted' },
 ];
 
 const targetOptions = [
@@ -40,6 +45,9 @@ const targetOptions = [
   { value: 'listing', label: 'Listing' },
   { value: 'user', label: 'User account' },
   { value: 'export', label: 'Data export' },
+  { value: 'report', label: 'Report' },
+  { value: 'rating', label: 'Rating' },
+  { value: 'business', label: 'Business' },
 ];
 
 function buildQuery(filters: Filters, before?: string) {

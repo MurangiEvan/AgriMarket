@@ -13,6 +13,10 @@ type Overview = {
   users: Partial<Record<'buyer' | 'seller' | 'admin', number>>;
   buyerTypes: Partial<Record<string, number>>;
   agrisetaSupportedBusinesses: number;
+  openReports: number;
+  pendingDeletionRequests: number;
+  ratings: { total: number; satisfactionScore: number | null; pendingComments: number };
+  deals: { made: number; outcomesRecorded: number; dealRate: number | null; valueBands: Partial<Record<string, number>> };
 };
 
 type AdminContextValue = {
@@ -36,6 +40,9 @@ const navigation = [
   { href: '/', label: 'Overview', badge: null },
   { href: '/verifications', label: 'Applications', badge: 'verifications' },
   { href: '/photos', label: 'Produce photos', badge: 'photos' },
+  { href: '/reports', label: 'Reports', badge: 'reports' },
+  { href: '/ratings', label: 'Rating comments', badge: 'ratings' },
+  { href: '/deletions', label: 'Deletion requests', badge: 'deletions' },
   { href: '/audit', label: 'Audit log', badge: null },
 ] as const;
 
@@ -109,7 +116,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const badgeCounts = { verifications: overview?.verifications.pending ?? 0, photos: overview?.listings.pending ?? 0 };
+  const badgeCounts = { verifications: overview?.verifications.pending ?? 0, photos: overview?.listings.pending ?? 0, reports: overview?.openReports ?? 0, deletions: overview?.pendingDeletionRequests ?? 0, ratings: overview?.ratings.pendingComments ?? 0 };
 
   return (
     <AdminContext.Provider value={{ user: session.user, overview, refreshOverview }}>

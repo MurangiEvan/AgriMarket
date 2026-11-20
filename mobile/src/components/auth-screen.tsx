@@ -13,12 +13,13 @@ export function AuthScreen({ registration = false }: { registration?: boolean })
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState('');
   const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
   const passwordInput = useRef<ElementRef<typeof TextInput>>(null);
 
   async function submit() {
-    if (busy) return;
+    if (busy || (registration && !acceptedTerms)) return;
     Keyboard.dismiss();
     setBusy(true);
     setError('');
@@ -99,12 +100,29 @@ export function AuthScreen({ registration = false }: { registration?: boolean })
             style={[styles.input, focusedField === 'password' && styles.inputFocused]}
           />
           {registration ? <Text style={styles.helper}>Use at least 10 characters. Email delivery is not configured, so confirmation messages are not sent.</Text> : null}
+          {registration ? (
+            <View style={styles.consentRow}>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptedTerms }}
+                accessibilityLabel="I have read and accept the Privacy notice and Terms of use"
+                hitSlop={8}
+                onPress={() => setAcceptedTerms((value) => !value)}
+                style={acceptedTerms ? styles.checkboxChecked : styles.checkbox}
+              >
+                {acceptedTerms ? <Text style={styles.checkmark}>✓</Text> : null}
+              </Pressable>
+              <Text style={styles.consentText}>
+                I have read and accept the <Link href="/privacy" style={styles.inlineLink}>Privacy notice</Link> and the <Link href="/terms" style={styles.inlineLink}>Terms of use</Link>.
+              </Text>
+            </View>
+          ) : null}
           {visibleError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{visibleError}</Text> : null}
           <Pressable
             accessibilityRole="button"
-            disabled={busy || !email.trim() || !password}
+            disabled={busy || !email.trim() || !password || (registration && !acceptedTerms)}
             onPress={() => void submit()}
-            style={[styles.primary, (busy || !email.trim() || !password) && styles.disabled]}
+            style={[styles.primary, (busy || !email.trim() || !password || (registration && !acceptedTerms)) && styles.disabled]}
           >
             <Text style={styles.primaryText}>{busy ? 'Please wait…' : registration ? 'Create account' : 'Sign in'}</Text>
           </Pressable>
@@ -131,6 +149,12 @@ const styles = StyleSheet.create({
   page: { flexGrow: 1, justifyContent: 'center', padding: 20 },
   card: { width: '100%', maxWidth: 480, alignSelf: 'center', gap: 12, padding: 26, borderRadius: 18, backgroundColor: 'rgba(255, 255, 255, 0.8)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.6)', boxShadow: '0 18px 48px rgba(0, 0, 0, 0.35)' },
   brand: { color: '#235946', fontSize: 13, fontWeight: '900', letterSpacing: 2 },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  checkbox: { width: 22, height: 22, marginTop: 1, borderRadius: 5, borderWidth: 2, borderColor: '#526259', backgroundColor: '#fff' },
+  checkboxChecked: { width: 22, height: 22, marginTop: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 2, borderColor: '#235946', backgroundColor: '#235946' },
+  checkmark: { color: '#fff', fontSize: 13, fontWeight: '900', lineHeight: 16 },
+  consentText: { flex: 1, color: '#364b3e', fontSize: 13, lineHeight: 20 },
+  inlineLink: { color: '#235946', fontWeight: '800', textDecorationLine: 'underline' },
   title: { color: '#183f32', fontSize: 30, fontWeight: '800' },
   description: { marginBottom: 8, color: '#526259', fontSize: 15, lineHeight: 22 },
   label: { color: '#183f32', fontSize: 14, fontWeight: '700' },

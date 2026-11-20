@@ -28,6 +28,19 @@ test('authenticated users are sent to their role home and cannot open role-restr
   assert.equal(getAuthRedirect('signedIn', 'buyer', ''), '/market');
   assert.equal(getAuthRedirect('signedIn', 'seller', 'sign-in'), '/account');
   assert.equal(getAuthRedirect('signedIn', 'admin', 'admin'), null);
-  assert.equal(getAuthRedirect('signedIn', 'seller', 'market'), '/account');
   assert.equal(getAuthRedirect('signedIn', 'buyer', 'admin'), '/market');
+});
+
+test('sellers can buy too, so they can open the Near me market; administrators cannot', () => {
+  assert.equal(getAuthRedirect('signedIn', 'seller', 'market'), null);
+  assert.equal(getAuthRedirect('signedIn', 'buyer', 'market'), null);
+  assert.equal(getAuthRedirect('signedIn', 'admin', 'market'), '/admin');
+});
+
+test('the Privacy notice and Terms can be read before signing up and while signed in', () => {
+  for (const route of ['privacy', 'terms']) {
+    assert.equal(getAuthRedirect('signedOut', null, route), null);
+    assert.equal(getAuthRedirect('signedIn', 'buyer', route), null);
+    assert.equal(getAuthRedirect('signedIn', 'seller', route), null);
+  }
 });

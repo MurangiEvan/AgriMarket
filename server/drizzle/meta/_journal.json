@@ -71,6 +71,41 @@
       "when": 1794559196289,
       "tag": "0009_mean_skaar",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795095365945,
+      "tag": "0010_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795096038018,
+      "tag": "0011_privacy_and_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795160492035,
+      "tag": "0012_enquiry_outcome",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795160876542,
+      "tag": "0013_ratings",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795161598226,
+      "tag": "0014_drone_licence",
+      "breakpoints": true
     }
   ]
 }

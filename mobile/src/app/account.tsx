@@ -8,6 +8,9 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import { ApiError, apiRequest, apiResourceUrl, BUYER_ORGANISATION_TYPES, prepareForUpload, uploadWithRetry, buyerOrganisationLabel, getBuyerProfile, getCategories, getSellerProduceTypes, saveBuyerProfile, type BuyerOrganisationType, type BuyerProfile, type Category, type SellerProduceType, type SessionUser } from '@/lib/api';
 import { categoryColor, categoryIcon, produceIcon, SERVICE_CATEGORY_SLUGS } from '@/constants/produce-icons';
+import { DeleteAccountSection } from '@/components/delete-account-section';
+import { DroneLicenceFields } from '@/components/drone-licence-fields';
+import { SellerRatingsSection } from '@/components/seller-ratings-section';
 import { greeting, PageHero } from '@/components/page-hero';
 import { useSession } from '@/components/session-provider';
 
@@ -118,9 +121,14 @@ export default function AccountScreen() {
         <Pressable accessibilityRole="button" onPress={() => signOut().catch(() => setError('Sign out failed.'))} style={styles.heroButton}><Text style={styles.heroButtonText}>Sign out</Text></Pressable>
       </PageHero>
       {user.role === 'seller' ? <SellerDashboard user={user} /> : null}
+      {user.role === 'seller' && user.id !== 'offline-session' ? <SellerRatingsSection /> : null}
+      {user.role === 'seller' && user.id !== 'offline-session' ? <BuyerOrganisation forSeller /> : null}
       {user.role === 'buyer' ? <BuyerDashboard /> : null}
       {user.role === 'admin' ? <Link href="/admin" style={styles.linkText}>Open administrator review</Link> : null}
       <Link href="/help" style={styles.linkText}>Help & support</Link>
+      <Link href="/privacy" style={styles.linkText}>Privacy notice</Link>
+      <Link href="/terms" style={styles.linkText}>Terms of use</Link>
+      {user.role !== 'admin' && user.id !== 'offline-session' ? <DeleteAccountSection /> : null}
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
     </AccountFrame>
   );
@@ -130,7 +138,9 @@ function AccountFrame({ children }: React.PropsWithChildren) {
   return <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled"><View style={styles.frame}>{children}</View></ScrollView>;
 }
 
-function BuyerOrganisation() {
+// `forSeller`: sellers can buy from other suppliers too; for them this section is optional, so the
+// "add this first" banner is not shown.
+function BuyerOrganisation({ forSeller = false }: { forSeller?: boolean }) {
   const [organisationName, setOrganisationName] = useState('');
   const [organisationType, setOrganisationType] = useState<BuyerOrganisationType | ''>('');
   const [saved, setSaved] = useState<BuyerProfile | null>(null);
@@ -175,10 +185,13 @@ function BuyerOrganisation() {
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Who you buy for</Text>
+        <Text style={styles.sectionTitle}>{forSeller ? 'Buying from other suppliers' : 'Who you buy for'}</Text>
         {saved ? <Text style={styles.statusTag}>{buyerOrganisationLabel(saved.organisationType)}</Text> : null}
       </View>
-      {loaded && !saved ? (
+      {forSeller ? (
+        <Text style={styles.muted}>Your account can buy as well as sell. Before you send an enquiry to another supplier, tell them who you buy for.</Text>
+      ) : null}
+      {loaded && !saved && !forSeller ? (
         <View style={[styles.banner, styles.bannerWaiting]}>
           <Text style={styles.bannerTitle}>Tell sellers who you are</Text>
           <Text style={styles.bannerBody}>Add your organisation before sending your first enquiry. Sellers respond faster when they know they are dealing with a hotel, school, retailer or processor.</Text>
@@ -203,8 +216,52 @@ function BuyerOrganisation() {
   );
 }
 
+// Buyers can start selling with the same account; their business still applies and is approved first.
+function StartSelling() {
+  const { becomeSeller } = useSession();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function start() {
+    setBusy(true);
+    setError('');
+    try {
+      await becomeSeller();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Your account could not be switched. Try again.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Start selling on AgriMarket</Text>
+      <Text style={styles.muted}>Farm, process or offer a service? Use this same account to sell. You keep everything you have as a buyer: your enquiries, ratings and saved area.</Text>
+      {confirming ? (
+        <>
+          <Text style={styles.helper}>Next you will fill in your business details, upload verification documents and a photo. Buyers only see your business after an administrator approves it.</Text>
+          <View style={styles.choiceWrap}>
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => void start()} style={[styles.primaryButton, styles.inlineButton, busy && styles.disabled]}>
+              <Text style={styles.primaryText}>{busy ? 'Switching…' : 'Yes, start selling'}</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => setConfirming(false)} style={[styles.secondaryButton, styles.inlineButton]}>
+              <Text style={styles.secondaryText}>Not now</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : (
+        <Pressable accessibilityRole="button" onPress={() => setConfirming(true)} style={styles.secondaryButton}>
+          <Text style={styles.secondaryText}>I want to sell</Text>
+        </Pressable>
+      )}
+      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 function BuyerDashboard() {
-  return <><BuyerOrganisation /><View style={styles.section}><Text style={styles.sectionTitle}>Your enquiries</Text><Text style={styles.muted}>Enquiries stay in your account so you can follow each supplier conversation.</Text><Link href="/market" style={styles.linkText}>Find produce near me</Link><Link href="/enquiries" style={styles.linkText}>View your enquiries</Link><Link href="/explore" style={styles.linkText}>Search the supplier directory</Link><Text style={styles.helper}>AgriMarket links you with verified businesses. Prices, payment and delivery are agreed directly with the seller.</Text></View></>;
+  return <><BuyerOrganisation /><StartSelling /><View style={styles.section}><Text style={styles.sectionTitle}>Your enquiries</Text><Text style={styles.muted}>Enquiries stay in your account so you can follow each supplier conversation.</Text><Link href="/market" style={styles.linkText}>Find produce near me</Link><Link href="/enquiries" style={styles.linkText}>View your enquiries</Link><Link href="/explore" style={styles.linkText}>Search the supplier directory</Link><Text style={styles.helper}>AgriMarket links you with verified businesses. Prices, payment and delivery are agreed directly with the seller.</Text></View></>;
 }
 
 function SellerDashboard({ user }: { user: SessionUser }) {
@@ -509,6 +566,7 @@ function SellerDashboard({ user }: { user: SessionUser }) {
     <>
       <Text style={styles.fieldLabel}>Category</Text>
       <View style={styles.choiceWrap}>{categories.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: categoryId === item.id }} onPress={() => { setCategoryId(item.id); setProduceTypeId(''); }} style={[styles.choice, categoryId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, categoryId === item.id && styles.choiceTextActive]}>{categoryIcon(item.slug)} {item.name}</Text></Pressable>)}</View>
+      {selectedCategorySlug === 'drone-services' ? <DroneLicenceFields /> : null}
       <Text style={styles.fieldLabel}>What is it?</Text>
       <View style={styles.choiceWrap}>{produceTypes.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: produceTypeId === item.id }} onPress={() => setProduceTypeId(item.id)} style={[styles.choice, produceTypeId === item.id && styles.choiceActive]}><Text style={[styles.choiceText, produceTypeId === item.id && styles.choiceTextActive]}>{produceIcon(item.name, selectedCategorySlug)} {item.name}</Text></Pressable>)}</View>
       {produceTypes.length === 0 ? <Text style={styles.helper}>{produceTypesLoading ? 'Loading produce types…' : 'No produce types are available for this category yet.'}</Text> : null}
@@ -716,6 +774,7 @@ const styles = StyleSheet.create({
   segmentText: { color: '#52675a', fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
   segmentTextActive: { color: '#fffefa' },
   primaryButton: { minHeight: 46, marginTop: 5, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: '#183f32' },
+  inlineButton: { marginTop: 0, paddingHorizontal: 16 },
   primaryText: { color: '#fffefa', fontSize: 13, fontWeight: '800' },
   secondaryButton: { minHeight: 42, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#aab9ab', borderRadius: 5 },
   secondaryText: { color: '#235946', fontSize: 12, fontWeight: '800' },

@@ -50,3 +50,89 @@ test('health endpoints do not reveal dependencies or secrets', async () => {
     await application.close();
   }
 });
+test('reporting a listing and reviewing reports both require sign-in', async () => {
+  const application = createApplication(environment);
+  const server = application.app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const api = `http://127.0.0.1:${address.port}/api/v1`;
+
+  try {
+    const report = await fetch(`${api}/reports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-agrimarket-client': 'native' },
+      body: JSON.stringify({ targetType: 'listing', targetId: '6f7c2a2e-9d1b-4a35-8c34-1f0f5b1c2d3e', reason: 'scam_or_fraud' }),
+    });
+    assert.equal(report.status, 401);
+
+    const queue = await fetch(`${api}/admin/reports`);
+    assert.equal(queue.status, 401);
+  } finally {
+    server.close();
+    await once(server, 'close');
+    await application.close();
+  }
+});
+
+test('deletion requests and privacy acceptance require sign-in', async () => {
+  const application = createApplication(environment);
+  const server = application.app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const api = `http://127.0.0.1:${address.port}/api/v1`;
+  const native = { 'Content-Type': 'application/json', 'x-agrimarket-client': 'native' };
+
+  try {
+    assert.equal((await fetch(`${api}/account/deletion-request`)).status, 401);
+    assert.equal((await fetch(`${api}/account/deletion-request`, { method: 'POST', headers: native, body: '{}' })).status, 401);
+    assert.equal((await fetch(`${api}/auth/privacy/accept`, { method: 'POST', headers: native, body: '{}' })).status, 401);
+    assert.equal((await fetch(`${api}/admin/deletion-requests`)).status, 401);
+  } finally {
+    server.close();
+    await once(server, 'close');
+    await application.close();
+  }
+});
+
+test('rating a supplier and moderating comments require sign-in', async () => {
+  const application = createApplication(environment);
+  const server = application.app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const api = `http://127.0.0.1:${address.port}/api/v1`;
+  const native = { 'Content-Type': 'application/json', 'x-agrimarket-client': 'native' };
+  const enquiryId = '6f7c2a2e-9d1b-4a35-8c34-1f0f5b1c2d3e';
+
+  try {
+    assert.equal((await fetch(`${api}/enquiries/${enquiryId}/rating`, { method: 'POST', headers: native, body: JSON.stringify({ stars: 5 }) })).status, 401);
+    assert.equal((await fetch(`${api}/seller/enquiries/ratings`)).status, 401);
+    assert.equal((await fetch(`${api}/admin/ratings`)).status, 401);
+  } finally {
+    server.close();
+    await once(server, 'close');
+    await application.close();
+  }
+});
+
+test('switching to a seller account requires sign-in', async () => {
+  const application = createApplication(environment);
+  const server = application.app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/auth/become-seller`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-agrimarket-client': 'native' },
+      body: '{}',
+    });
+    assert.equal(response.status, 401);
+  } finally {
+    server.close();
+    await once(server, 'close');
+    await application.close();
+  }
+});

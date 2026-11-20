@@ -8,10 +8,10 @@ import { auditLogs, businesses, categories, listingImages, listings, produceType
 import { searchLocations } from '../geocoding.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { listingTypeForCategory } from '../offerings.js';
-import { missingApplicationDetails, normalizeSouthAfricanPhone } from '../policies.js';
+import { isDroneCategory, listingTypeForCategory } from '../offerings.js';
+import { assertDroneLicenceOnFile, missingApplicationDetails, normalizeSouthAfricanPhone } from '../policies.js';
 import { MAX_DOCUMENT_BYTES, MAX_LISTING_PHOTO_INPUT_BYTES, type PrivateStorage, type PublicImageStorage } from '../storage.js';
-import { businessSchema, listingCreateSchema, listingUpdateSchema } from '../validation.js';
+import { businessSchema, droneLicenceSchema, listingCreateSchema, listingUpdateSchema } from '../validation.js';
 
 const MAX_LISTING_PHOTO_BYTES = MAX_LISTING_PHOTO_INPUT_BYTES;
 const listingImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_LISTING_PHOTO_BYTES, files: 5 } });
@@ -32,7 +32,7 @@ const applicationFieldsSchema = z.object({
 // only be added once the admin has approved the business.
 async function requireApprovedBusiness(db: Database, ownerId: string) {
   const [business] = await db
-    .select({ id: businesses.id, verificationStatus: businesses.verificationStatus })
+    .select({ id: businesses.id, verificationStatus: businesses.verificationStatus, sacaaRplNumber: businesses.sacaaRplNumber, sacaaRocNumber: businesses.sacaaRocNumber })
     .from(businesses)
     .where(eq(businesses.ownerId, ownerId))
     .limit(1);
@@ -96,6 +96,28 @@ export function createSellerRouter(
           whatsappPhone: businesses.whatsappPhone,
           verificationStatus: businesses.verificationStatus,
         });
+      response.json({ data: { business } });
+    }),
+  );
+
+  // SACAA numbers for drone services. Changing either number clears the administrator's check, so
+  // drone listings sent afterwards are checked against the new licence.
+  router.put(
+    '/business/drone-licence',
+    asyncRoute(async (request, response) => {
+      const input = droneLicenceSchema.parse(request.body);
+      const [current] = await db
+        .select({ id: businesses.id, sacaaRplNumber: businesses.sacaaRplNumber, sacaaRocNumber: businesses.sacaaRocNumber, droneLicenceVerified: businesses.droneLicenceVerified })
+        .from(businesses)
+        .where(eq(businesses.ownerId, request.auth!.id))
+        .limit(1);
+      if (!current) throw new HttpError(409, 'BUSINESS_REQUIRED', 'Save your business details first.');
+      const unchanged = current.sacaaRplNumber === input.sacaaRplNumber && current.sacaaRocNumber === input.sacaaRocNumber;
+      const [business] = await db
+        .update(businesses)
+        .set({ ...input, droneLicenceVerified: unchanged && current.droneLicenceVerified, updatedAt: new Date() })
+        .where(eq(businesses.id, current.id))
+        .returning({ sacaaRplNumber: businesses.sacaaRplNumber, sacaaRocNumber: businesses.sacaaRocNumber, droneLicenceVerified: businesses.droneLicenceVerified });
       response.json({ data: { business } });
     }),
   );
@@ -164,11 +186,12 @@ export function createSellerRouter(
       const input = listingCreateSchema.parse(request.body);
       const business = await requireApprovedBusiness(db, request.auth!.id);
       const [category] = await db
-        .select({ id: categories.id })
+        .select({ id: categories.id, slug: categories.slug })
         .from(categories)
         .where(and(eq(categories.id, input.categoryId), eq(categories.isActive, true)))
         .limit(1);
       if (!category) throw new HttpError(400, 'INVALID_CATEGORY', 'Choose an active listing category.');
+      if (isDroneCategory(category.slug)) assertDroneLicenceOnFile(business);
       const [produceType] = await db
         .select({ id: produceTypes.id })
         .from(produceTypes)
@@ -460,6 +483,8 @@ export function createSellerRouter(
           contactPhone: businesses.contactPhone,
           whatsappPhone: businesses.whatsappPhone,
           verificationStatus: businesses.verificationStatus,
+          sacaaRplNumber: businesses.sacaaRplNumber,
+          sacaaRocNumber: businesses.sacaaRocNumber,
         })
         .from(businesses)
         .where(eq(businesses.ownerId, request.auth!.id))
@@ -493,6 +518,7 @@ export function createSellerRouter(
         ))
         .limit(1);
       if (!choice) throw new HttpError(400, 'INVALID_PRODUCE_TYPE', 'Choose what your produce is from the list.');
+      if (isDroneCategory(choice.categorySlug)) assertDroneLicenceOnFile(business);
 
       const note = fields.note ?? '';
       const place = business.town ? ` in ${business.town}` : '';

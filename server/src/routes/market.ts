@@ -9,7 +9,8 @@ import { marketProduceQuerySchema } from '../validation.js';
 
 export function createMarketRouter(db: Database, sessionSecret: string): Router {
   const router = Router();
-  router.use(requireAuth(db, sessionSecret), requireRole('buyer'));
+  // Sellers can buy too (one account, both roles); only administrators are kept out.
+  router.use(requireAuth(db, sessionSecret), requireRole('buyer', 'seller'));
 
   router.get(
     '/categories',

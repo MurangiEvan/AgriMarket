@@ -14,6 +14,10 @@ type Listing = {
   businessName: string;
   verificationStatus: string;
   imageUrl: string | null;
+  isDroneService: boolean;
+  sacaaRplNumber: string | null;
+  sacaaRocNumber: string | null;
+  droneLicenceVerified: boolean;
 };
 
 export default function PhotosPage() {
@@ -22,6 +26,8 @@ export default function PhotosPage() {
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Drone listings need the SACAA licence checked once per business before the first one is published.
+  const [confirmDrone, setConfirmDrone] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setItems(await api<Listing[]>('/admin/listings?limit=50'));
@@ -34,12 +40,16 @@ export default function PhotosPage() {
   }, []);
 
   async function moderate(item: Listing, status: 'published' | 'rejected') {
+    if (status === 'published' && item.isDroneService && !item.droneLicenceVerified && !confirmDrone[item.id]) {
+      setError(`Check the SACAA licence for ${item.businessName} and tick the box before publishing a drone listing.`);
+      return;
+    }
     if (status === 'rejected' && !window.confirm(`Reject the ${item.title} photo from ${item.businessName}?`)) return;
     setBusyId(item.id);
     setError('');
     setNotice('');
     try {
-      await api(`/admin/listings/${item.id}/moderation`, { method: 'PATCH', body: JSON.stringify({ status, reason: '' }) });
+      await api(`/admin/listings/${item.id}/moderation`, { method: 'PATCH', body: JSON.stringify({ status, reason: '', confirmDroneLicence: status === 'published' && Boolean(confirmDrone[item.id]) }) });
       setNotice(status === 'published' ? `${item.title} from ${item.businessName} is now visible to buyers.` : `${item.title} from ${item.businessName} was rejected.`);
       await Promise.all([load(), refreshOverview()]);
     } catch (cause) {
@@ -80,6 +90,19 @@ export default function PhotosPage() {
                 </div>
                 {item.description ? <p style={{ fontSize: 14 }}>{item.description}</p> : null}
                 <p className="muted">Sent {formatDateTime(item.createdAt)}</p>
+                {item.isDroneService ? (
+                  <div className="stack" style={{ gap: 6 }}>
+                    <p className="muted">SACAA RPL <code>{item.sacaaRplNumber ?? 'not given'}</code> · ROC <code>{item.sacaaRocNumber ?? 'not given'}</code></p>
+                    {item.droneLicenceVerified ? (
+                      <p className="muted">Licence already checked for this business.</p>
+                    ) : (
+                      <label className="row" style={{ gap: 8, fontSize: 13 }}>
+                        <input type="checkbox" checked={Boolean(confirmDrone[item.id])} onChange={(event) => setConfirmDrone((current) => ({ ...current, [item.id]: event.target.checked }))} />
+                        I checked the SACAA licence
+                      </label>
+                    )}
+                  </div>
+                ) : null}
                 {!approvedBusiness ? <p className="alert info">Approve this business under Applications before publishing its photos.</p> : null}
                 <div className="row">
                   {approvedBusiness ? (

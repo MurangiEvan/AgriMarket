@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 
 import { useAppTheme } from '@/components/app-navigation';
+import { StarSummary } from '@/components/star-rating';
 import { ApiError, apiResourceUrl, getCategories, getListings, type Category, type ListingSummary } from '@/lib/api';
 
 const provinces = [
@@ -254,12 +255,14 @@ function ListingCard({ listing, index }: { listing: ListingSummary; index: numbe
           <View style={styles.badgeStack}>
             <View style={styles.verifiedBadge}><Text style={styles.badgeTick}>✓</Text><Text style={styles.badgeText}>Verified</Text></View>
             {listing.agrisetaSupported ? <View style={[styles.verifiedBadge, styles.agrisetaBadge]}><Text style={styles.badgeTick}>★</Text><Text style={styles.badgeText}>AgriSETA</Text></View> : null}
+            {listing.categorySlug === 'drone-services' && listing.droneLicenceVerified ? <View style={styles.verifiedBadge}><Text style={styles.badgeTick}>✈</Text><Text style={styles.badgeText}>SACAA licence</Text></View> : null}
           </View>
         </View>
         <View style={styles.cardContent}>
           <Text style={styles.cardCategory}>{listing.categoryName} · {listing.type}</Text>
           <Text numberOfLines={2} style={styles.cardTitle}>{listing.title}</Text>
           <Text numberOfLines={1} style={styles.cardBusiness}>{listing.businessName}</Text>
+          <StarSummary average={listing.ratingAverage} count={listing.ratingCount} compact />
           <View style={styles.cardFooter}><Text style={styles.cardLocation}>{[listing.town, listing.province].filter(Boolean).join(', ')}</Text><Text style={styles.cardArrow}>↗</Text></View>
         </View>
       </Pressable>

@@ -35,7 +35,8 @@ export default function AppNavigation({ children }: PropsWithChildren) {
   const [themeOverride, setThemeOverride] = useState<boolean | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const isDark = themeOverride ?? colorScheme === 'dark';
-  const visibleDestinations = destinations.filter((destination) => destination.href !== '/market' || user?.role === 'buyer');
+  // Sellers can buy too, so "Near me" is shown to buyers and sellers (not administrators).
+  const visibleDestinations = destinations.filter((destination) => destination.href !== '/market' || user?.role === 'buyer' || user?.role === 'seller');
   const home = user?.role === 'buyer' ? '/market' : user?.role === 'seller' ? '/account' : user?.role === 'admin' ? '/admin' : '/';
   // Every page except the role's home (and the landing page) gets a back button.
   const showBack = pathname !== home && pathname !== '/';

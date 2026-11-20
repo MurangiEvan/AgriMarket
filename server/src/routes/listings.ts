@@ -6,6 +6,7 @@ import type { Database } from '../db/client.js';
 import { businesses, categories, listingImages, listings } from '../db/schema.js';
 import { HttpError, asyncRoute } from '../http.js';
 import { normalizeSouthAfricanPhone } from '../policies.js';
+import { approvedComments, ratingSummaries } from '../ratings.js';
 import { publicListingQuerySchema } from '../validation.js';
 
 const decodedCursorSchema = z.object({ createdAt: z.iso.datetime(), id: z.uuid() });
@@ -57,6 +58,7 @@ export function createListingsRouter(db: Database): Router {
           businessId: businesses.id,
           businessName: businesses.name,
           agrisetaSupported: businesses.agrisetaSupported,
+          droneLicenceVerified: businesses.droneLicenceVerified,
           categorySlug: categories.slug,
           categoryName: categories.name,
         })
@@ -79,12 +81,14 @@ export function createListingsRouter(db: Database): Router {
         : [];
       const firstImage = new Map<string, (typeof images)[number]>();
       for (const image of images) if (!firstImage.has(image.listingId)) firstImage.set(image.listingId, image);
+      const summaries = await ratingSummaries(db, pageRows.map((row) => row.businessId));
       response.json({
         data: {
           items: pageRows.map((row) => {
             const image = firstImage.get(row.id);
             return {
               ...row,
+              ...summaries.get(row.businessId),
               verified: true,
               image: image ? { id: image.id, altText: image.altText, url: `/api/v1/media/listings/${image.id}` } : null,
             };
@@ -111,6 +115,7 @@ export function createListingsRouter(db: Database): Router {
           businessId: businesses.id,
           businessName: businesses.name,
           agrisetaSupported: businesses.agrisetaSupported,
+          droneLicenceVerified: businesses.droneLicenceVerified,
           businessDescription: businesses.description,
           businessProvince: businesses.province,
           businessTown: businesses.town,
@@ -141,6 +146,8 @@ export function createListingsRouter(db: Database): Router {
         .from(listingImages)
         .where(eq(listingImages.listingId, listingId))
         .orderBy(listingImages.sortOrder);
+      const [summaries, comments] = await Promise.all([ratingSummaries(db, [row.businessId]), approvedComments(db, row.businessId)]);
+      const summary = summaries.get(row.businessId);
 
       response.json({
         data: {
@@ -160,7 +167,10 @@ export function createListingsRouter(db: Database): Router {
             whatsappPhone: normalizeSouthAfricanPhone(row.whatsappPhone),
             verified: true,
             agrisetaSupported: row.agrisetaSupported,
+            droneLicenceVerified: row.droneLicenceVerified,
+            ...summary,
           },
+          reviews: comments,
         },
       });
     }),

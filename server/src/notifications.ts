@@ -6,6 +6,8 @@ export type NotificationType =
   | 'verification.rejected'
   | 'listing.published'
   | 'listing.rejected'
+  | 'listing.taken_down'
+  | 'account.deletion_rejected'
   | 'enquiry.received';
 
 type Writer = Pick<Database, 'insert'>;
@@ -80,5 +82,29 @@ export function enquiryNotification(userId: string, listingTitle: string, messag
     title: buyerOrganisation ? `New enquiry from ${buyerOrganisation} about ${listingTitle}` : `New enquiry about ${listingTitle}`,
     body: message,
     link: '/enquiries',
+  };
+}
+
+// Sent when an administrator takes a listing down after a buyer's report. The reporter is never named.
+export function listingTakenDownNotification(userId: string, title: string, note: string): NewNotification {
+  return {
+    userId,
+    type: 'listing.taken_down',
+    title: `Your ${title} listing was taken down`,
+    body: note
+      ? `A buyer reported it and an administrator agreed. Administrator note: ${note}`
+      : 'A buyer reported it and an administrator agreed. Contact AgriMarket support if you think this is a mistake.',
+    link: '/account',
+  };
+}
+
+// An administrator kept the account open (for example while a fraud report is investigated).
+export function deletionRejectedNotification(userId: string, note: string): NewNotification {
+  return {
+    userId,
+    type: 'account.deletion_rejected',
+    title: 'Your account deletion request was not approved',
+    body: `Administrator note: ${note}`,
+    link: '/account',
   };
 }

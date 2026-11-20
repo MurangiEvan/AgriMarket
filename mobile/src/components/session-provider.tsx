@@ -3,6 +3,8 @@ import { AppState, Platform } from 'react-native';
 import { createContext, useCallback, useContext, useEffect, useState, type Context, type PropsWithChildren } from 'react';
 
 import {
+  acceptPrivacyNotice,
+  becomeSeller as becomeSellerRequest,
   ApiError,
   getCurrentUser,
   register as registerUser,
@@ -25,6 +27,8 @@ type SessionContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, role: 'buyer' | 'seller') => Promise<void>;
   signOut: () => Promise<void>;
+  acceptPrivacy: () => Promise<void>;
+  becomeSeller: () => Promise<void>;
 };
 
 const sessionContextRegistry = globalThis as typeof globalThis & {
@@ -170,7 +174,18 @@ export function SessionProvider({ children }: PropsWithChildren) {
     setError('');
   }
 
-  const value = { status, user, loading: status === 'loading', offline, error, signIn, register, signOut };
+  async function acceptPrivacy() {
+    await acceptPrivacyNotice();
+    setUser((current) => (current ? { ...current, privacyAccepted: true } : current));
+  }
+
+  async function becomeSeller() {
+    const updated = await becomeSellerRequest();
+    await AsyncStorage.setItem(SESSION_HINT_KEY, updated.role);
+    setUser((current) => (current ? { ...current, role: updated.role } : current));
+  }
+
+  const value = { status, user, loading: status === 'loading', offline, error, signIn, register, signOut, acceptPrivacy, becomeSeller };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 

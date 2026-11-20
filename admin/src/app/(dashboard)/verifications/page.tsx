@@ -20,6 +20,10 @@ type Verification = {
   agrisetaReference: string | null;
   agrisetaSupported: boolean;
   photos: { listingId: string; title: string; description: string; status: string; imageUrl: string | null }[];
+  offersDroneServices: boolean;
+  sacaaRplNumber: string | null;
+  sacaaRocNumber: string | null;
+  droneLicenceVerified: boolean;
 };
 
 const tabs: { value: Status; label: string }[] = [
@@ -35,6 +39,8 @@ export default function VerificationsPage() {
   const [feedback, setFeedback] = useState<Record<string, string>>({});
   // AgriSETA support is only confirmed when the admin ticks the box after checking the reference.
   const [confirmAgriseta, setConfirmAgriseta] = useState<Record<string, boolean>>({});
+  // Drone applications cannot be approved until the admin has checked the SACAA licence.
+  const [confirmDrone, setConfirmDrone] = useState<Record<string, boolean>>({});
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -65,6 +71,10 @@ export default function VerificationsPage() {
       setError(`Write feedback for ${item.businessName} before rejecting, so the seller knows what to fix.`);
       return;
     }
+    if (decision === 'approved' && item.offersDroneServices && !item.droneLicenceVerified && !confirmDrone[item.id]) {
+      setError(`Check the SACAA licence for ${item.businessName} and tick "I checked the SACAA licence" before approving drone services.`);
+      return;
+    }
     if (decision === 'rejected' && !window.confirm(`Reject the application from ${item.businessName}? The seller will see your feedback and must send the whole application again.`)) return;
     setBusyId(item.id);
     setError('');
@@ -72,7 +82,7 @@ export default function VerificationsPage() {
     try {
       await api(`/admin/verifications/${item.id}/decision`, {
         method: 'POST',
-        body: JSON.stringify({ decision, sellerFeedback: sellerFeedback || null, internalReason: null, confirmAgriseta: decision === 'approved' && Boolean(confirmAgriseta[item.id]) }),
+        body: JSON.stringify({ decision, sellerFeedback: sellerFeedback || null, internalReason: null, confirmAgriseta: decision === 'approved' && Boolean(confirmAgriseta[item.id]), confirmDroneLicence: decision === 'approved' && Boolean(confirmDrone[item.id]) }),
       });
       setNotice(decision === 'approved' ? `${item.businessName} is approved and their produce photo is now live for buyers.` : `${item.businessName} was rejected and the seller can see your feedback.`);
       await Promise.all([load(status), refreshOverview()]);
@@ -147,6 +157,30 @@ export default function VerificationsPage() {
               ))}
             </div>
           </div>
+
+          {item.offersDroneServices ? (
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="label">SACAA drone licence</span>
+              <p>
+                Remote Pilot Licence (RPL): <code>{item.sacaaRplNumber ?? 'not given'}</code> · Remote Operating Certificate (ROC): <code>{item.sacaaRocNumber ?? 'not given'}</code>
+              </p>
+              {item.status === 'pending' && !item.droneLicenceVerified ? (
+                <>
+                  <label className="row" style={{ gap: 8, fontSize: 14 }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(confirmDrone[item.id])}
+                      onChange={(event) => setConfirmDrone((current) => ({ ...current, [item.id]: event.target.checked }))}
+                    />
+                    I checked the SACAA licence (required to approve drone services)
+                  </label>
+                  <p className="muted">Compare the numbers with the licence the seller uploaded among the documents. Drone work without a valid RPL and ROC is illegal.</p>
+                </>
+              ) : (
+                <p className="muted">{item.droneLicenceVerified ? 'Checked: buyers see "SACAA licence checked" on drone listings.' : 'Not checked.'}</p>
+              )}
+            </div>
+          ) : null}
 
           <div className="stack" style={{ gap: 6 }}>
             <span className="label">AgriSETA support</span>

@@ -2,6 +2,7 @@ import '@/global.css';
 import { Redirect, Stack, useSegments } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import AppTabs from '@/components/app-tabs';
+import { PrivacyGate } from '@/components/privacy-gate';
 import { SessionProvider, useSession } from '@/components/session-provider';
 import { getAuthRedirect } from '@/lib/auth-routing';
 
@@ -21,6 +22,10 @@ function AuthNavigation() {
 
   if (status === 'loading') return <LoadingScreen />;
   if (redirect) return <Redirect href={redirect} />;
+  // Accounts that have not accepted the current Privacy notice do so once, but can still read it first.
+  if (status === 'signedIn' && user?.privacyAccepted === false && !['privacy', 'terms', 'help'].includes(route)) {
+    return <PrivacyGate />;
+  }
 
   const routes = <Stack screenOptions={{ headerShown: false }} />;
   return status === 'signedIn' ? <AppTabs>{routes}</AppTabs> : routes;

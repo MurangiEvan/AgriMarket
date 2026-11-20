@@ -33,3 +33,20 @@ test('Brevo mailer reports rejected sends', async () => {
   const mailer = createBrevoMailer({ apiKey: 'bad', fromEmail: 'no-reply@example.test', fromName: 'AgriMarket' }, fakeFetch);
   await assert.rejects(() => mailer.sendPasswordReset('seller@example.test', 'https://app.example.test/reset-password?token=abc'), /HTTP 401/);
 });
+
+test('Brevo mailer confirms an approved account deletion without any links', async () => {
+  const calls: RequestInit[] = [];
+  const fakeFetch = (async (_url: string, init: RequestInit) => {
+    calls.push(init);
+    return new Response('{}', { status: 201 });
+  }) as typeof fetch;
+  const mailer = createBrevoMailer({ apiKey: 'test-key', fromEmail: 'no-reply@example.test', fromName: 'AgriMarket' }, fakeFetch);
+
+  await mailer.sendAccountDeleted('former@example.test');
+
+  const body = JSON.parse(String(calls[0]!.body)) as { to: { email: string }[]; subject: string; textContent: string; htmlContent: string };
+  assert.deepEqual(body.to, [{ email: 'former@example.test' }]);
+  assert.equal(body.subject, 'Your AgriMarket account has been deleted');
+  assert.match(body.textContent, /documents and photos have been removed/);
+  assert.equal(body.htmlContent.includes('href='), false);
+});
